@@ -1,0 +1,18 @@
+# 编译产物
+*.o
+*.d
+*.crf
+*.axf
+*.hex
+*.bin
+*.map
+*.lst
+
+# Keil
+*.uvguix.*
+*.bak
+RTE/
+
+# 临时文件
+*.tmp
+*.log
