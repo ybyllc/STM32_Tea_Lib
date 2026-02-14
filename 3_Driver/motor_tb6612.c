@@ -43,6 +43,12 @@
   */
 void Motor_Init(void)
 {
+	// 配置TIM3为16kHz (48MHz / 3 / 1000 = 16kHz)
+    __HAL_TIM_SET_PRESCALER(&htim3,  3 - 1);
+    __HAL_TIM_SET_AUTORELOAD(&htim3, 1000 - 1);
+    // 生成更新事件，使配置立即生效
+    HAL_TIM_GenerateEvent(&htim3, TIM_EVENTSOURCE_UPDATE);
+	
   GPIO_InitTypeDef GPIO_InitStruct = {0};
 
   /* 启用GPIO时钟 */

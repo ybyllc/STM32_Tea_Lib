@@ -13,6 +13,7 @@
 #include "motor_tb6612.h"
 #include "motor_standard.h"
 #include "PWM_standard.h"
+#include "servo_pwm.h"
 #include "key_pc6.h"
 #include "encoder.h"
 #include "car_task.h"
@@ -22,6 +23,7 @@
 #include "stm32f4xx_hal_adc.h"
 #include "stm32f4xx_hal_gpio.h"
 #include <stdio.h>
+#include <stdlib.h>
 
 // 陀螺仪类型枚举
 typedef enum {
@@ -923,21 +925,16 @@ static void Menu_DisplayPS2TestPage(void) {
 
 /**
  * @brief 显示PS2控制模式页面
- * @note 使用PS2手柄摇杆控制后电机（航模PWM模式：50Hz，1-2ms）
- *       左摇杆控制左后电机（A6-A7），右摇杆控制右后电机（B0-B1）
+ * @note 使用PS2手柄摇杆控制PWM输出（航模PWM模式：50Hz，1000-2000us）
+ *       左摇杆Y->B1, 左摇杆X->B0, 右摇杆Y->A7, 右摇杆X->A6
  */
 static void Menu_DisplayPS2ControlPage(void) {
-    static int16_t left_speed = 0;   // 左后电机速度
-    static int16_t right_speed = 0;  // 右后电机速度
     static MenuPageType last_page = MENU_PAGE_MAIN;
     static uint8_t servo_initialized = 0;
     
     // 检测页面切换（从 PS2_CONTROL 切换到其他页面）
     if (last_page == MENU_PAGE_PS2_CONTROL && menuState.currentPage != MENU_PAGE_PS2_CONTROL) {
-        // 停止所有电机（标准PWM模式）
-        PWM_Standard_StopAll();
-        left_speed = 0;
-        right_speed = 0;
+        Servo_Pwm_StopAll();
     }
     last_page = menuState.currentPage;
     
@@ -948,38 +945,41 @@ static void Menu_DisplayPS2ControlPage(void) {
     
     OLED_Clear(0);
     
-    // 首次进入时初始化PS2和标准PWM电机驱动
+    // 首次进入时初始化PS2和舵机PWM
     if (!ps2_initialized) {
         Menu_InitPS2();
     }
     if (!servo_initialized) {
-        PWM_Standard_Init();
+        Servo_Pwm_Init();
         servo_initialized = 1;
     }
     
     // 读取PS2数据
     AX_PS2_ScanKey(&ps2_joystick);
     
-    // 左摇杆Y轴控制左后电机 (A6-A7)
-    int16_t left_y = ps2_joystick.LJoy_UD;
-    left_speed = (int16_t)((left_y - 128) * 1000 / 128);
-    left_speed = -left_speed;  // 反转方向：摇杆上(0)应该是前进(正速度)
-    
-    // 右摇杆Y轴控制右后电机 (B0-B1)
-    int16_t right_y = ps2_joystick.RJoy_UD;
-    right_speed = (int16_t)((right_y - 128) * 1000 / 128);
-    right_speed = -right_speed;  // 反转方向
+    // 摇杆值(0-255)转换为PWM脉宽(1000-2000us)，128为中位
+    // 公式: pulse = 1500 + (stick - 128) * 500 / 127
+    // 左摇杆Y -> B1
+    uint16_t left_y_pwm = 1500 + (int16_t)(ps2_joystick.LJoy_UD - 128) * 500 / 127;
+    // 左摇杆X -> B0
+    uint16_t left_x_pwm = 1500 + (int16_t)(ps2_joystick.LJoy_LR - 128) * 500 / 127;
+    // 右摇杆Y -> A7
+    uint16_t right_y_pwm = 1500 + (int16_t)(ps2_joystick.RJoy_UD - 128) * 500 / 127;
+    // 右摇杆X -> A6
+    uint16_t right_x_pwm = 1500 + (int16_t)(ps2_joystick.RJoy_LR - 128) * 500 / 127;
     
     // 设置死区，避免摇杆中位时的抖动
-    if (left_speed > -50 && left_speed < 50) left_speed = 0;
-    if (right_speed > -50 && right_speed < 50) right_speed = 0;
+    #define PWM_DEADZONE 30
+    if (abs((int16_t)left_y_pwm - 1500) < PWM_DEADZONE) left_y_pwm = 1500;
+    if (abs((int16_t)left_x_pwm - 1500) < PWM_DEADZONE) left_x_pwm = 1500;
+    if (abs((int16_t)right_y_pwm - 1500) < PWM_DEADZONE) right_y_pwm = 1500;
+    if (abs((int16_t)right_x_pwm - 1500) < PWM_DEADZONE) right_x_pwm = 1500;
     
-    // 应用速度到后电机（标准PWM模式）
-    PWM_Standard_SetSpeed(PWM_MOTOR_BACK_LEFT, left_speed);
-    PWM_Standard_SetSpeed(PWM_MOTOR_BACK_RIGHT, right_speed);
-    
-    // 清屏
-    OLED_Clear(0);
+    // 设置PWM输出
+    Servo_Pwm_SetPulse(SERVO_PWM_CH_B1, left_y_pwm);
+    Servo_Pwm_SetPulse(SERVO_PWM_CH_B0, left_x_pwm);
+    Servo_Pwm_SetPulse(SERVO_PWM_CH_A7, right_y_pwm);
+    Servo_Pwm_SetPulse(SERVO_PWM_CH_A6, right_x_pwm);
     
     // 使用16号字体，每行占2个page（16像素高度）
     // 第0-1行：LX（左摇杆X轴）
