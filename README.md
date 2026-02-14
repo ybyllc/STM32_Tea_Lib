@@ -165,6 +165,7 @@ hsc_Lib/
 - STM32F1/F4 HAL库
 - Keil MDK / STM32CubeIDE
 - C99标准
+- GB2312中文编码
 
 ## 移植指南
 
