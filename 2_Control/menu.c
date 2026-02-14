@@ -1,0 +1,1190 @@
+/**
+ * @file menu.c
+ * @brief 菜单系统核心实现
+ * @note 负责子菜单管理和菜单系统的整体逻辑
+ */
+
+#include "menu.h"
+#include "menu_input.h"
+#include "wit_gyro_sdk.h"
+#include "icm42670.h"
+#include "TOF_VL53L0X.h"
+#include "remote_key.h"
+#include "motor_tb6612.h"
+#include "motor_standard.h"
+#include "PWM_standard.h"
+#include "key_pc6.h"
+#include "encoder.h"
+#include "car_task.h"
+#include "oled.h"
+#include "ax_ps2.h"
+#include "stm32f4xx_hal.h"
+#include "stm32f4xx_hal_adc.h"
+#include "stm32f4xx_hal_gpio.h"
+#include <stdio.h>
+
+// 陀螺仪类型枚举
+typedef enum {
+    GYRO_TYPE_NONE,        // 无陀螺仪
+    GYRO_TYPE_WIT,         // 原来的陀螺仪
+    GYRO_TYPE_ICM42670     // ICM42670 陀螺仪
+} GyroType;
+
+// 模块初始化状态标志
+uint8_t gyro_initialized = 0;    // 陀螺仪是否已初始化
+uint8_t tof_initialized = 0;     // TOF是否已初始化
+uint8_t remote_key_initialized = 0; // 遥控器是否已初始化
+uint8_t motor_initialized = 0;   // 电机是否已初始化
+uint8_t adc_initialized = 0;     // ADC是否已初始化
+uint8_t ps2_initialized = 0;     // PS2手柄是否已初始化
+uint8_t gpio_initialized = 0;    // GPIO测试是否已初始化
+
+// ADC句柄
+ADC_HandleTypeDef hadc1;
+
+// 电机测试状态
+int16_t motor_speeds[4] = {0, 0, 0, 0}; // 四个电机的速度值（-1000到1000）
+uint8_t current_motor_index = 0; // 当前选中的电机索引（0-3）
+uint8_t motor_speed_adjust_mode = 0; // 速度调整模式：0-选择电机模式，1-调整速度模式
+
+// 系统状态变量
+uint8_t system_mode = 0; // 0-菜单模式, 1-任务模式
+uint32_t task_start_time = 0; // 任务开始时间
+
+// 编码器累计值
+int32_t encoder1_total_count = 0; // 编码器1的累计值
+int32_t encoder2_total_count = 0; // 编码器2的累计值
+
+// 当前使用的陀螺仪类型
+static GyroType current_gyro_type = GYRO_TYPE_NONE;
+
+// 外部函数声明
+extern void Gryo_Update(void);
+
+// 静态函数声明
+static void Menu_DisplayGyroPage(void);
+static void Menu_DisplayEc11TestPage(void);
+static void Menu_DisplayTofTestPage(void);
+static void Menu_DisplayRemoteKeyTestPage(void);
+static void Menu_DisplayMotorTestPage(void);
+static void Menu_DisplayEncoderTestPage(void);
+static void Menu_DisplayAdcTestPage(void);
+static void Menu_DisplayPS2TestPage(void);
+static void Menu_DisplayPS2ControlPage(void);
+static void Menu_DisplayGPIOTestPage(void);
+static void Menu_DisplayMainMenu(void);
+static void Menu_DisplayCurrentPage(void);
+
+/**
+ * @brief 绘制摇杆进度条（带中心点）
+ * @param x: 起始x坐标
+ * @param y: 起始y坐标
+ * @param width: 进度条总宽度
+ * @param value: 摇杆值 (0-255, 128为中位)
+ */
+static void DrawStickBar(u8 x, u8 y, u8 width, u8 value) {
+    u8 height = 6;  // 进度条高度
+    u8 center_x = x + width / 2;  // 中心位置（中位点）
+    
+    // 绘制外框
+    OLED_DrawRectangle(x, y, x + width, y + height, 1);
+    
+    // 计算填充位置（value: 0-255 -> 0-width）
+    // 128为中位，小于128向左填充，大于128向右填充
+    if (value > 128) {
+        // 向右填充
+        u8 fill_width = ((value - 128) * (width / 2)) / 127;
+        if (fill_width > 0) {
+            OLED_DrawFillRectangle(center_x, y + 1, center_x + fill_width, y + height - 1, 1);
+        }
+    } else if (value < 128) {
+        // 向左填充
+        u8 fill_width = ((128 - value) * (width / 2)) / 128;
+        if (fill_width > 0) {
+            OLED_DrawFillRectangle(center_x - fill_width, y + 1, center_x, y + height - 1, 1);
+        }
+    }
+    
+    // 绘制中心线
+    OLED_DrawLine(center_x, y, center_x, y + height, 1);
+}
+
+/**
+ * @brief 初始化ADC（仅在第一次进入ADC页面时调用）
+ * @retval 0-失败, 1-成功
+ */
+uint8_t Menu_InitAdc(void) {
+    if (adc_initialized) {
+        return 1;  // 已经初始化过
+    }
+    
+    // 启用GPIOC时钟
+    __HAL_RCC_GPIOC_CLK_ENABLE();
+    
+    // 启用ADC1时钟
+    __HAL_RCC_ADC1_CLK_ENABLE();
+    
+    // 配置PC4引脚为ADC输入
+    GPIO_InitTypeDef GPIO_InitStruct = {
+        .Pin = GPIO_PIN_4,
+        .Mode = GPIO_MODE_ANALOG,
+        .Pull = GPIO_NOPULL
+    };
+    HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
+    
+    // 配置ADC
+    hadc1.Instance = ADC1;
+    hadc1.Init.ClockPrescaler = ADC_CLOCK_SYNC_PCLK_DIV4;
+    hadc1.Init.Resolution = ADC_RESOLUTION_12B;
+    hadc1.Init.ScanConvMode = DISABLE;
+    hadc1.Init.ContinuousConvMode = DISABLE;  // 单次转换模式
+    hadc1.Init.DiscontinuousConvMode = DISABLE;
+    hadc1.Init.ExternalTrigConvEdge = ADC_EXTERNALTRIGCONVEDGE_NONE;
+    hadc1.Init.ExternalTrigConv = ADC_SOFTWARE_START;
+    hadc1.Init.DataAlign = ADC_DATAALIGN_RIGHT;
+    hadc1.Init.NbrOfConversion = 1;
+    hadc1.Init.DMAContinuousRequests = DISABLE;
+    hadc1.Init.EOCSelection = ADC_EOC_SINGLE_CONV;
+    
+    if (HAL_ADC_Init(&hadc1) != HAL_OK) {
+        return 0;  // 初始化失败
+    }
+    
+    // 配置ADC通道
+    ADC_ChannelConfTypeDef sConfig = {
+        .Channel = ADC_CHANNEL_14,  // PC4对应ADC1通道14
+        .Rank = 1,
+        .SamplingTime = ADC_SAMPLETIME_480CYCLES  // 使用较长的采样时间
+    };
+    
+    if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK) {
+        return 0;  // 通道配置失败
+    }
+    
+    adc_initialized = 1;
+    return 1;
+}
+
+/**
+ * @brief 初始化PS2手柄（仅在第一次进入PS2页面时调用）
+ * @retval 0-失败, 1-成功
+ */
+uint8_t Menu_InitPS2(void) {
+    if (ps2_initialized) {
+        return 1;  // 已经初始化过
+    }
+    
+    // 初始化PS2手柄
+    AX_PS2_Init();
+    AX_PS2_SetInit();
+    
+    ps2_initialized = 1;
+    return 1;
+}
+
+/**
+ * @brief 初始化陀螺仪（仅在第一次进入Gyro页面时调用）
+ * @retval 0-失败, 1-成功
+ */
+uint8_t Menu_InitGyro(void) {
+    if (gyro_initialized) {
+        return 1;  // 已经初始化过
+    }
+    
+    // 尝试初始化 ICM42670
+    if (ICM42670_Init()) {
+        current_gyro_type = GYRO_TYPE_ICM42670;
+        gyro_initialized = 1;
+        return 1;
+    }
+    
+    // 如果 ICM42670 失败，尝试初始化串口陀螺仪（WIT）
+    Gryo_init();  // 串口陀螺仪初始化
+    current_gyro_type = GYRO_TYPE_WIT;
+    gyro_initialized = 1;
+    return 1;
+}
+
+/**
+ * @brief 初始化TOF（仅在第一次进入TOF页面时调用）
+ * @retval 0-失败, 1-成功
+ */
+uint8_t Menu_InitTof(void) {
+    if (tof_initialized) {
+        return 1;  // 已经初始化过
+    }
+    
+    if (VL53L0X_Init() == 0) {
+        tof_initialized = 1;
+        return 1;
+    }
+    
+    return 0;  // 初始化失败
+}
+
+/**
+ * @brief 初始化遥控器（仅在第一次进入Remote Key页面时调用）
+ * @retval 0-失败, 1-成功
+ */
+uint8_t Menu_InitRemoteKey(void) {
+    if (remote_key_initialized) {
+        return 1;  // 已经初始化过
+    }
+    
+    RemoteKey_Init();
+    remote_key_initialized = 1;
+    return 1;
+}
+
+/**
+ * @brief 初始化电机（仅在第一次进入Motor Test页面时调用）
+ * @retval 0-失败, 1-成功
+ */
+uint8_t Menu_InitMotor(void) {
+    if (motor_initialized) {
+        return 1;  // 已经初始化过
+    }
+    
+    Motor_Init();
+    motor_initialized = 1;
+    return 1;
+}
+
+/**
+ * @brief  通用陀螺仪更新函数，根据当前使用的陀螺仪类型调用对应的更新函数
+ * @param  无
+ * @retval 无
+ */
+void Menu_Gryo_Update(void) {
+    switch (current_gyro_type) {
+        case GYRO_TYPE_ICM42670:
+            // 使用 ICM42670 陀螺仪
+            ICM42670_Gryo_Update();
+            break;
+        case GYRO_TYPE_WIT:
+            // 使用原来的陀螺仪
+            Gryo_Update();
+            break;
+        case GYRO_TYPE_NONE:
+        default:
+            // 无陀螺仪，不做任何操作
+            break;
+    }
+}
+
+// 主菜单项目定义
+const MenuItem mainMenuItems[] = {
+    {"Gyro Info", MENU_PAGE_GYRO},
+    {"EC11 Test", MENU_PAGE_EC11_TEST},
+    {"TOF Test", MENU_PAGE_TOF_TEST},
+    {"Remote Key Test", MENU_PAGE_REMOTE_KEY_TEST},
+    {"Motor Test", MENU_PAGE_MOTOR_TEST},
+    {"Encoder Test", MENU_PAGE_ENCODER_TEST},
+    {"ADC Test", MENU_PAGE_ADC_TEST},
+    {"PS2 Test", MENU_PAGE_PS2_TEST},
+    {"PS2 Control", MENU_PAGE_PS2_CONTROL},
+    {"GPIO Test", MENU_PAGE_GPIO_TEST}
+};
+
+// 主菜单项目数量
+uint8_t MAIN_MENU_ITEM_COUNT = (sizeof(mainMenuItems) / sizeof(MenuItem));
+
+// 菜单状态
+MenuState menuState;
+
+/**
+ * @brief 菜单系统初始化
+ */
+void Menu_Init(void) {
+    menuState.currentPage = MENU_PAGE_MAIN;
+    menuState.currentItem = 0;
+    menuState.lastEncoderCount = 0;
+    menuState.isInMenu = 1;
+    
+    // 初始化OLED
+    OLED_Init();
+    OLED_Clear(0);
+    
+    // 初始化输入处理
+    MenuInput_Init();
+    
+    // 显示初始页面
+    Menu_DisplayMainMenu();
+}
+
+/**
+ * @brief 主任务函数
+ * @note 启动car_task，让陀螺仪z轴保持在30度来笔直前进
+ */
+static void Menu_RunMainTask(void) {
+    OLED_Clear(0);
+    
+    // 在屏幕中间显示反色的 "Task Start"
+    OLED_ShowString_Reverse(40, 3, "Task Start", 16);
+    
+    OLED_Refresh();
+    
+    // 初始化car_task
+    Car_Task_Init();
+    
+    // 启动car_task
+    Car_Task_Start();
+    
+    // 记录任务开始时间
+    task_start_time = HAL_GetTick();
+    
+    // 切换到任务模式
+    system_mode = 1;
+}
+
+/**
+ * @brief 菜单系统运行
+ * @note 在主循环中调用
+ */
+void Menu_Run(void) {
+    // 初始化PC6按键
+    static uint8_t key_pc6_initialized = 0;
+    if (!key_pc6_initialized) {
+        KeyPC6_Init();
+        key_pc6_initialized = 1;
+    }
+    
+    // 检测PC6按键事件
+    uint8_t key_pc6_event = KeyPC6_CheckEvent();
+    if (key_pc6_event != 0) {
+        if (key_pc6_event == 1) {
+            if (system_mode == 0) {
+                // 短按：启动主任务
+                Menu_RunMainTask();
+            } else {
+                // 任务模式下短按：停止主任务
+                Car_Task_Stop();
+                system_mode = 0;
+                OLED_Clear(0);
+                OLED_ShowString(40, 3, "Task Stop", 16);
+                OLED_Refresh();
+                HAL_Delay(1000);
+                OLED_Clear(0);
+            }
+        } else if (key_pc6_event == 2) {
+            // 长按：系统重启
+            HAL_NVIC_SystemReset();
+        }
+    }
+    
+    // 检查任务模式
+    if (system_mode == 1) {
+        // 执行car_task主函数
+        Car_Task_Main();
+        
+        // 短暂延迟，避免执行过快
+        HAL_Delay(5);
+        
+        return; // 任务模式下不执行菜单操作
+    }
+    
+    // 获取编码器计数
+    int32_t encoderCount = MenuInput_GetEncoderCount();
+    
+    // 处理编码器输入
+    if (encoderCount != menuState.lastEncoderCount) {
+        MenuInput_HandleEncoder(encoderCount);
+        menuState.lastEncoderCount = encoderCount;
+    }
+    
+    // 获取按键事件
+    uint8_t keyEvent = MenuInput_GetEncoderKeyEvent();
+    if (keyEvent != 0) {
+        MenuInput_HandleKeyEvent(keyEvent);
+    }
+    
+    // 扫描遥控器按键状态
+    MenuInput_ScanRemoteKey();
+    
+    // 显示当前页面
+    Menu_DisplayCurrentPage();
+    
+    // 短暂延迟，避免显示刷新过快
+    HAL_Delay(5);
+}
+
+/**
+ * @brief 获取当前菜单状态
+ * @return 菜单状态指针
+ */
+MenuState* Menu_GetState(void) {
+    return &menuState;
+}
+
+/**
+ * @brief 添加新的子菜单
+ * @param name 菜单项名称
+ * @param page 菜单项对应的页面
+ * @return 0-失败, 1-成功
+ * @note 此函数需要在 Menu_Init() 之前调用
+ */
+uint8_t Menu_AddItem(const char* name, MenuPageType page) {
+    // 注意：此函数目前仅作为接口，实际添加子菜单需要修改 mainMenuItems 数组
+    // 后续可以实现动态添加子菜单的功能
+    printf("Menu_AddItem: %s, page: %d\r\n", name, page);
+    return 1;
+}
+
+/**
+ * @brief 获取主菜单项数量
+ * @return 主菜单项数量
+ */
+uint8_t Menu_GetMainItemCount(void) {
+    return MAIN_MENU_ITEM_COUNT;
+}
+
+/**
+ * @brief 获取主菜单项
+ * @param index 菜单项索引
+ * @return 菜单项指针
+ */
+const MenuItem* Menu_GetMainItem(uint8_t index) {
+    if (index < MAIN_MENU_ITEM_COUNT) {
+        return &mainMenuItems[index];
+    }
+    return NULL;
+}
+
+/**
+ * @brief 显示陀螺仪信息页面
+ */
+static void Menu_DisplayGyroPage(void) {
+    OLED_Clear(0);
+    
+    // 首次进入时初始化陀螺仪
+    if (!gyro_initialized) {
+        Menu_InitGyro();
+    }
+    
+    // 更新陀螺仪数据
+    Menu_Gryo_Update();
+    
+    char str[20];
+    char str1[20];
+    
+    // 改为竖排，与原来的显示样式一致
+    sprintf(str, "servo:");
+    OLED_ShowString(0, 0, str, 16);
+    sprintf(str1, "%.1f", fYaw);
+    OLED_ShowString_Reverse(strlen(str)*8, 0, str1, 16);
+    
+    sprintf(str, "x:%.1f", fAngle[0]);
+    OLED_ShowString(0, 2, str, 16);
+    sprintf(str, "y:%.1f", fAngle[1]);
+    OLED_ShowString(0, 4, str, 16);
+    sprintf(str, "z:%.1f", fAngle[2]);
+    OLED_ShowString(0, 6, str, 16);
+
+    sprintf(str, " x:%.1f", fAcc[0]*10);
+    OLED_ShowString(63, 2, str, 16);
+    sprintf(str, " y:%.1f", fAcc[1]*10);
+    OLED_ShowString(63, 4, str, 16);
+    sprintf(str, " z:%.1f", fAcc[2]*10);
+    OLED_ShowString(63, 6, str, 16);
+    
+    // 舵机控制 - 每次最多移动0.5度，2度死区
+    extern float servo_current_angle;
+    extern float servo_target_angle;
+    float target_angle = servo_current_angle + fAngle[1];
+    servo_target_angle = target_angle;
+    
+    sprintf(str1, "%.1f", target_angle);
+    OLED_ShowString_Reverse(strlen(str)*8, 0, str1, 16);
+    
+    OLED_Refresh();
+}
+
+/**
+ * @brief 显示EC11测试页面
+ */
+static void Menu_DisplayEc11TestPage(void) {
+    OLED_Clear(0);
+    
+    // 显示标题
+    OLED_ShowString(0, 0, "EC11 Test", 16);
+    
+    // 初始化PC6按键
+    static uint8_t key_pc6_initialized = 0;
+    if (!key_pc6_initialized) {
+        KeyPC6_Init();
+        key_pc6_initialized = 1;
+    }
+    
+    // 获取当前计数
+    int32_t currentCount = MenuInput_GetEncoderCount();
+    
+    // 显示计数值
+    char str[20];
+    sprintf(str, "Count:%4d", currentCount);
+    OLED_ShowString(0, 2, str, 16);
+    
+    // 显示编码器按键状态
+    char str1[20];
+    sprintf(str1, "EncKey:%s", MenuInput_GetEncoderKeyState() ? "R" : "P");
+    OLED_ShowString(0, 4, str1, 12);
+    
+    // 显示PC6按键状态
+    sprintf(str1, "PC6Key:%s", KeyPC6_GetState() ? "R" : "P");
+    OLED_ShowString(0, 5, str1, 12);
+    
+    // 显示提示信息
+    OLED_ShowString(0, 7, "Turn & Press!", 12);
+    
+    OLED_Refresh();
+}
+
+/**
+ * @brief 显示TOF测试页面
+ */
+static void Menu_DisplayTofTestPage(void) {
+    OLED_Clear(0);
+    
+    // 显示标题
+    OLED_ShowString(0, 0, "TOF Test", 16);
+    
+    // 首次进入时初始化TOF
+    if (!tof_initialized) {
+        Menu_InitTof();
+    }
+    
+    // 读取距离（使用快速测试函数）
+    u16 distance_mm = TOF_QuickTest();
+    
+    // 显示距离值
+    char str[20];
+    if (distance_mm == 0xFFFF) {
+        sprintf(str, "Dist: Error");
+    } else if (distance_mm <= 44) {
+        // 低于 44mm，显示超出范围
+        sprintf(str, "Dist: <4.4cm");
+    } else if (distance_mm >= 8190) {
+        // 高于 8190mm，显示超出范围
+        sprintf(str, "Dist: >120cm");
+    } else {
+        // 正常范围，转换为 cm 显示
+        float distance_cm = distance_mm / 10.0f;
+        sprintf(str, "Dist:%5.1f cm", distance_cm);
+    }
+    OLED_ShowString(0, 2, str, 16);
+    
+    // 显示状态
+    u8 ready = VL53L0X_IsReady();
+    sprintf(str, "Status:%s", ready ? "OK" : "ERR");
+    OLED_ShowString(0, 4, str, 16);
+    
+    // 显示提示
+    OLED_ShowString(0, 6, "Long press back", 12);
+    
+    OLED_Refresh();
+}
+
+/**
+ * @brief 显示遥控器测试页面
+ */
+static void Menu_DisplayRemoteKeyTestPage(void) {
+    OLED_Clear(0);
+    
+    // 显示标题
+    OLED_ShowString(0, 0, "Remote Key Test", 16);
+    
+    // 首次进入时初始化遥控器
+    if (!remote_key_initialized) {
+        Menu_InitRemoteKey();
+    }
+    
+    // 显示按键状态
+    char str[20];
+    for (uint8_t i = 0; i < REMOTE_KEY_MAX; i++) {
+        uint8_t state = RemoteKey_GetState((RemoteKeyType)i);
+        RemoteKeyEventType event = RemoteKey_GetEvent((RemoteKeyType)i);
+        
+        switch (i) {
+            case REMOTE_KEY_D0:
+                sprintf(str, "D0:%s", state ? "P" : "R");
+                break;
+            case REMOTE_KEY_D1:
+                sprintf(str, "D1:%s", state ? "P" : "R");
+                break;
+            case REMOTE_KEY_D2:
+                sprintf(str, "D2:%s", state ? "P" : "R");
+                break;
+            case REMOTE_KEY_D3:
+                sprintf(str, "D3:%s", state ? "P" : "R");
+                break;
+            default:
+                sprintf(str, "Unknown");
+                break;
+        }
+        
+        // 显示事件信息
+        if (event != REMOTE_KEY_EVENT_NONE) {
+            char event_str[10];
+            switch (event) {
+                case REMOTE_KEY_EVENT_SINGLE_CLICK:
+                    sprintf(event_str, "S");
+                    break;
+                case REMOTE_KEY_EVENT_LONG_PRESS:
+                    sprintf(event_str, "L");
+                    break;
+                case REMOTE_KEY_EVENT_LONG_PRESS_RELEASE:
+                    sprintf(event_str, "LR");
+                    break;
+                default:
+                    sprintf(event_str, "N");
+                    break;
+            }
+            sprintf(str + strlen(str), " %s", event_str);
+        }
+        
+        OLED_ShowString(0, (i + 1), str, 12);
+    }
+    
+    // 显示提示
+    OLED_ShowString(0, 7, "Press keys!", 12);
+    
+    OLED_Refresh();
+}
+
+/**
+ * @brief 显示电机测试页面
+ */
+static void Menu_DisplayMotorTestPage(void) {
+    OLED_Clear(0);
+    
+    // 首次进入时初始化电机
+    if (!motor_initialized) {
+        Menu_InitMotor();
+    }
+    
+    char str[20];
+    
+    // 前左电机
+    if (current_motor_index == 0) {
+        OLED_ShowString(0, 0, ">", 16);
+        OLED_ShowString(20, 0, "FL:", 16);
+        sprintf(str, "%4d", motor_speeds[0]);
+        if (motor_speed_adjust_mode && current_motor_index == 0) {
+            // 速度调整模式下，反色显示速度数字
+            OLED_ShowString_Reverse(52, 0, str, 16);
+        } else {
+            OLED_ShowString(52, 0, str, 16);
+        }
+    } else {
+        OLED_ShowString(20, 0, "FL:", 16);
+        sprintf(str, "%4d", motor_speeds[0]);
+        OLED_ShowString(52, 0, str, 16);
+    }
+    
+    // 前右电机
+    if (current_motor_index == 1) {
+        OLED_ShowString(0, 2, ">", 16);
+        OLED_ShowString(20, 2, "FR:", 16);
+        sprintf(str, "%4d", motor_speeds[1]);
+        if (motor_speed_adjust_mode && current_motor_index == 1) {
+            // 速度调整模式下，反色显示速度数字
+            OLED_ShowString_Reverse(52, 2, str, 16);
+        } else {
+            OLED_ShowString(52, 2, str, 16);
+        }
+    } else {
+        OLED_ShowString(20, 2, "FR:", 16);
+        sprintf(str, "%4d", motor_speeds[1]);
+        OLED_ShowString(52, 2, str, 16);
+    }
+    
+    // 后左电机
+    if (current_motor_index == 2) {
+        OLED_ShowString(0, 4, ">", 16);
+        OLED_ShowString(20, 4, "BL:", 16);
+        sprintf(str, "%4d", motor_speeds[2]);
+        if (motor_speed_adjust_mode && current_motor_index == 2) {
+            // 速度调整模式下，反色显示速度数字
+            OLED_ShowString_Reverse(52, 4, str, 16);
+        } else {
+            OLED_ShowString(52, 4, str, 16);
+        }
+    } else {
+        OLED_ShowString(20, 4, "BL:", 16);
+        sprintf(str, "%4d", motor_speeds[2]);
+        OLED_ShowString(52, 4, str, 16);
+    }
+    
+    // 后右电机
+    if (current_motor_index == 3) {
+        OLED_ShowString(0, 6, ">", 16);
+        OLED_ShowString(20, 6, "BR:", 16);
+        sprintf(str, "%4d", motor_speeds[3]);
+        if (motor_speed_adjust_mode && current_motor_index == 3) {
+            // 速度调整模式下，反色显示速度数字
+            OLED_ShowString_Reverse(52, 6, str, 16);
+        } else {
+            OLED_ShowString(52, 6, str, 16);
+        }
+    } else {
+        OLED_ShowString(20, 6, "BR:", 16);
+        sprintf(str, "%4d", motor_speeds[3]);
+        OLED_ShowString(52, 6, str, 16);
+    }
+    
+    OLED_Refresh();
+}
+
+/**
+ * @brief 显示编码器测试页面
+ */
+static void Menu_DisplayEncoderTestPage(void) {
+    OLED_Clear(0);
+    
+    // 显示标题
+    OLED_ShowString(0, 0, "Encoder Test", 16);
+    
+    // 初始化编码器（电机编码器，使用TIM2和TIM5）
+    static uint8_t encoder_initialized = 0;
+    if (!encoder_initialized) {
+        Encoder_Init();
+        encoder_initialized = 1;
+    }
+    
+    // 更新编码器累计值
+    encoder1_total_count += Encoder_GetCount(ENCODER_1);
+    encoder2_total_count += Encoder_GetCount(ENCODER_2);
+    
+    // 显示编码器累计值
+    char str[20];
+    sprintf(str, "Enc1:%6ld", encoder1_total_count);
+    OLED_ShowString(0, 2, str, 16);
+    
+    sprintf(str, "Enc2:%6ld", encoder2_total_count);
+    OLED_ShowString(0, 4, str, 16);
+    
+    // 显示提示信息
+    OLED_ShowString(0, 6, "Turn the motors", 12);
+    
+    OLED_Refresh();
+}
+
+/**
+ * @brief 显示ADC测试页面
+ */
+static void Menu_DisplayAdcTestPage(void) {
+    OLED_Clear(0);
+    
+    // 显示标题
+    OLED_ShowString(0, 0, "ADC Test", 16);
+    
+    // 首次进入时初始化ADC
+    if (!adc_initialized) {
+        Menu_InitAdc();
+    }
+    
+    // 启动ADC转换
+    HAL_ADC_Start(&hadc1);
+    
+    // 等待转换完成
+    HAL_ADC_PollForConversion(&hadc1, 100);
+    
+    // 读取ADC值
+    uint32_t adc_value = HAL_ADC_GetValue(&hadc1);
+    
+    // 停止ADC
+    HAL_ADC_Stop(&hadc1);
+    
+    // 转换为电压值（V）
+    float voltage = (float)adc_value * 3.3f / 4095.0f;
+    
+    // 显示电压值
+    char str[20];
+    sprintf(str, "Voltage:%.2f V", voltage);
+    OLED_ShowString(0, 2, str, 16);
+    
+    // 显示ADC原始值
+    sprintf(str, "ADC Value:%4lu", adc_value);
+    OLED_ShowString(0, 4, str, 16);
+    
+    // 显示提示信息
+    OLED_ShowString(0, 6, "PC4 as ADC input", 12);
+    
+    OLED_Refresh();
+}
+
+// PS2手柄数据结构
+static JOYSTICK_TypeDef ps2_joystick;
+
+/**
+ * @brief 显示PS2手柄测试页面
+ * @note 使用ax_ps2驱动，只显示按键值
+ */
+static void Menu_DisplayPS2TestPage(void) {
+    OLED_Clear(0);
+    
+    // 首次进入时初始化PS2
+    if (!ps2_initialized) {
+        Menu_InitPS2();
+    }
+    
+    // 按键震动反馈状态
+    static uint8_t last_btn1 = 0xFF;
+    static uint8_t last_btn2 = 0xFF;
+    static uint32_t vibration_start_time = 0;
+    static uint8_t is_vibrating = 0;
+    static uint8_t motor1 = 0;
+    static uint8_t motor2 = 0;
+    
+    // 检测按键变化
+    if ((ps2_joystick.btn1 != last_btn1) || (ps2_joystick.btn2 != last_btn2)) {
+        // 有按键按下时震动
+        if ((ps2_joystick.btn1 != 0xFF) || (ps2_joystick.btn2 != 0xFF)) {
+            motor1 = 0xFF;  // 大电机全速
+            motor2 = 0x01;  // 小电机开启
+            vibration_start_time = HAL_GetTick();
+            is_vibrating = 1;
+        }
+    }
+    
+    // 震动持续100ms后关闭
+    if (is_vibrating && (HAL_GetTick() - vibration_start_time > 100)) {
+        motor1 = 0x00;  // 关闭大电机
+        motor2 = 0x00;  // 关闭小电机
+        is_vibrating = 0;
+    }
+    
+    last_btn1 = ps2_joystick.btn1;
+    last_btn2 = ps2_joystick.btn2;
+    
+    // 读取PS2数据（带震动）
+    AX_PS2_ScanKeyVibration(&ps2_joystick, motor1, motor2);
+    
+    // 显示模式和原始键值 (12号字体，第0行)
+    char str[20];
+    sprintf(str, "M:%02X B1:%02X B2:%02X", ps2_joystick.mode, ps2_joystick.btn1, ps2_joystick.btn2);
+    OLED_ShowString(0, 0, str, 12);
+    
+    // 显示右摇杆数值 (第1行)
+    sprintf(str, "RX:%3d RY:%3d", ps2_joystick.RJoy_LR, ps2_joystick.RJoy_UD);
+    OLED_ShowString(0, 1, str, 12);
+    
+    // 显示左摇杆数值 (第2行)
+    sprintf(str, "LX:%3d LY:%3d", ps2_joystick.LJoy_LR, ps2_joystick.LJoy_UD);
+    OLED_ShowString(0, 2, str, 12);
+    
+    // 显示方向键状态 (第3行)
+    // btn1: B0:SLCT B1:JR  B2:JL B3:STRT B4:UP B5:R B6:DOWN B7:L
+    OLED_ShowString(0, 3, "DPad:", 12);
+    if (ps2_joystick.btn1 & 0x10) OLED_ShowString(36, 3, "U", 12);
+    else OLED_ShowString(36, 3, "-", 12);
+    if (ps2_joystick.btn1 & 0x40) OLED_ShowString(48, 3, "D", 12);
+    else OLED_ShowString(48, 3, "-", 12);
+    if (ps2_joystick.btn1 & 0x80) OLED_ShowString(60, 3, "L", 12);
+    else OLED_ShowString(60, 3, "-", 12);
+    if (ps2_joystick.btn1 & 0x20) OLED_ShowString(72, 3, "R", 12);
+    else OLED_ShowString(72, 3, "-", 12);
+    
+    // 显示按键状态 (第4行)
+    // btn2: B0:L2 B1:R2 B2:L1 B3:R1 B4:Y B5:B B6:A B7:X
+    OLED_ShowString(0, 4, "Key:", 12);
+    if (ps2_joystick.btn2 & 0x10) OLED_ShowString(30, 4, "Y", 12);
+    else OLED_ShowString(30, 4, "-", 12);
+    if (ps2_joystick.btn2 & 0x20) OLED_ShowString(42, 4, "B", 12);
+    else OLED_ShowString(42, 4, "-", 12);
+    if (ps2_joystick.btn2 & 0x40) OLED_ShowString(54, 4, "A", 12);
+    else OLED_ShowString(54, 4, "-", 12);
+    if (ps2_joystick.btn2 & 0x80) OLED_ShowString(66, 4, "X", 12);
+    else OLED_ShowString(66, 4, "-", 12);
+    
+    // 显示肩键 (第5行) - 顺序：L1 L2 R1 R2
+    // btn2: B0:L2   B1:R2  B2:L1  B3:R1
+    OLED_ShowString(0, 5, "L1:", 12);
+    OLED_ShowString(21, 5, (ps2_joystick.btn2 & 0x04) ? "1" : "0", 12);
+    OLED_ShowString(36, 5, "L2:", 12);
+    OLED_ShowString(57, 5, (ps2_joystick.btn2 & 0x01) ? "1" : "0", 12);
+    OLED_ShowString(69, 5, "R1:", 12);
+    OLED_ShowString(90, 5, (ps2_joystick.btn2 & 0x08) ? "1" : "0", 12);
+    OLED_ShowString(102, 5, "R2:", 12);
+    OLED_ShowString(123, 5, (ps2_joystick.btn2 & 0x02) ? "1" : "0", 12);
+    
+    // 显示摇杆按下按键 (第6行) - 顺序：JR JL ST SL
+    // btn1: B0:SLCT B1:JR  B2:JL B3:STRT
+    OLED_ShowString(0, 6, "JR:", 12);
+    OLED_ShowString(24, 6, (ps2_joystick.btn1 & 0x02) ? "1" : "0", 12);
+    OLED_ShowString(36, 6, "JL:", 12);
+    OLED_ShowString(60, 6, (ps2_joystick.btn1 & 0x04) ? "1" : "0", 12);
+    OLED_ShowString(72, 6, "ST:", 12);
+    OLED_ShowString(96, 6, (ps2_joystick.btn1 & 0x08) ? "1" : "0", 12);
+    OLED_ShowString(108, 6, "SL:", 12);
+    OLED_ShowString(120, 6, (ps2_joystick.btn1 & 0x01) ? "1" : "0", 12);
+    
+    OLED_Refresh();
+}
+
+/**
+ * @brief 显示PS2控制模式页面
+ * @note 使用PS2手柄摇杆控制后电机（航模PWM模式：50Hz，1-2ms）
+ *       左摇杆控制左后电机（A6-A7），右摇杆控制右后电机（B0-B1）
+ */
+static void Menu_DisplayPS2ControlPage(void) {
+    static int16_t left_speed = 0;   // 左后电机速度
+    static int16_t right_speed = 0;  // 右后电机速度
+    static MenuPageType last_page = MENU_PAGE_MAIN;
+    static uint8_t servo_initialized = 0;
+    
+    // 检测页面切换（从 PS2_CONTROL 切换到其他页面）
+    if (last_page == MENU_PAGE_PS2_CONTROL && menuState.currentPage != MENU_PAGE_PS2_CONTROL) {
+        // 停止所有电机（标准PWM模式）
+        PWM_Standard_StopAll();
+        left_speed = 0;
+        right_speed = 0;
+    }
+    last_page = menuState.currentPage;
+    
+    // 如果当前不是 PS2_CONTROL 页面，直接返回
+    if (menuState.currentPage != MENU_PAGE_PS2_CONTROL) {
+        return;
+    }
+    
+    OLED_Clear(0);
+    
+    // 首次进入时初始化PS2和标准PWM电机驱动
+    if (!ps2_initialized) {
+        Menu_InitPS2();
+    }
+    if (!servo_initialized) {
+        PWM_Standard_Init();
+        servo_initialized = 1;
+    }
+    
+    // 读取PS2数据
+    AX_PS2_ScanKey(&ps2_joystick);
+    
+    // 左摇杆Y轴控制左后电机 (A6-A7)
+    int16_t left_y = ps2_joystick.LJoy_UD;
+    left_speed = (int16_t)((left_y - 128) * 1000 / 128);
+    left_speed = -left_speed;  // 反转方向：摇杆上(0)应该是前进(正速度)
+    
+    // 右摇杆Y轴控制右后电机 (B0-B1)
+    int16_t right_y = ps2_joystick.RJoy_UD;
+    right_speed = (int16_t)((right_y - 128) * 1000 / 128);
+    right_speed = -right_speed;  // 反转方向
+    
+    // 设置死区，避免摇杆中位时的抖动
+    if (left_speed > -50 && left_speed < 50) left_speed = 0;
+    if (right_speed > -50 && right_speed < 50) right_speed = 0;
+    
+    // 应用速度到后电机（标准PWM模式）
+    PWM_Standard_SetSpeed(PWM_MOTOR_BACK_LEFT, left_speed);
+    PWM_Standard_SetSpeed(PWM_MOTOR_BACK_RIGHT, right_speed);
+    
+    // 清屏
+    OLED_Clear(0);
+    
+    // 使用16号字体，每行占2个page（16像素高度）
+    // 第0-1行：LX（左摇杆X轴）
+    OLED_ShowString(0, 0, "LX:", 16);
+    DrawStickBar(28, 0, 100, ps2_joystick.LJoy_LR);
+    
+    // 第2-3行：LY（左摇杆Y轴）
+    OLED_ShowString(0, 2, "LY:", 16);
+    DrawStickBar(28, 16, 100, ps2_joystick.LJoy_UD);
+    
+    // 第4-5行：RX（右摇杆X轴）
+    OLED_ShowString(0, 4, "RX:", 16);
+    DrawStickBar(28, 32, 100, ps2_joystick.RJoy_LR);
+    
+    // 第6-7行：RY（右摇杆Y轴）
+    OLED_ShowString(0, 6, "RY:", 16);
+    DrawStickBar(28, 48, 100, ps2_joystick.RJoy_UD);
+    
+    OLED_Refresh();
+}
+
+// GPIO测试引脚状态（用函数调用次数计数）
+static uint8_t gpio_cycle_counter[4] = {0, 0, 0, 0};    // 周期计数器（0-9）
+
+// 每个引脚在10次函数调用中的高电平次数
+static const uint8_t gpio_pin_high_times[4] = {1, 2, 3, 4};
+#define GPIO_CYCLE_MAX  10  // 10次函数调用为一个周期
+
+/**
+ * @brief 初始化GPIO测试引脚（PC0-PC3）
+ */
+static void Menu_InitGPIOTest(void) {
+    if (gpio_initialized) return;
+    
+    GPIO_InitTypeDef GPIO_InitStruct = {0};
+    
+    // 启用GPIOC时钟
+    __HAL_RCC_GPIOC_CLK_ENABLE();
+    
+    // 配置PC0-PC3为推挽输出
+    GPIO_InitStruct.Pin = GPIO_PIN_0 | GPIO_PIN_1 | GPIO_PIN_2 | GPIO_PIN_3;
+    GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+    GPIO_InitStruct.Pull = GPIO_NOPULL;
+    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
+    HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
+    
+    // 初始状态为低电平
+    HAL_GPIO_WritePin(GPIOC, GPIO_PIN_0 | GPIO_PIN_1 | GPIO_PIN_2 | GPIO_PIN_3, GPIO_PIN_RESET);
+    
+    // 初始化计数器
+    for (int i = 0; i < 4; i++) {
+        gpio_cycle_counter[i] = 0;
+    }
+    
+    gpio_initialized = 1;
+}
+
+/**
+ * @brief 显示GPIO测试页面
+ * @note 测试PC0-PC3引脚，10次函数调用一个周期，不同引脚不同高电平次数
+ */
+static void Menu_DisplayGPIOTestPage(void) {
+    static MenuPageType last_page = MENU_PAGE_MAIN;
+    
+    // 检测页面切换（从 GPIO_TEST 切换到其他页面）
+    if (last_page == MENU_PAGE_GPIO_TEST && menuState.currentPage != MENU_PAGE_GPIO_TEST) {
+        // 停止 PWM，将引脚设为高电平（PS2通信默认状态）
+        HAL_GPIO_WritePin(GPIOC, GPIO_PIN_0 | GPIO_PIN_1 | GPIO_PIN_2 | GPIO_PIN_3, GPIO_PIN_SET);
+        gpio_initialized = 0;
+    }
+    last_page = menuState.currentPage;
+    
+    // 如果当前不是 GPIO_TEST 页面，直接返回
+    if (menuState.currentPage != MENU_PAGE_GPIO_TEST) {
+        return;
+    }
+    
+    // 初始化GPIO（首次进入）
+    if (!gpio_initialized) {
+        Menu_InitGPIOTest();
+    }
+    
+    // 先更新GPIO输出
+    uint16_t pins[4] = {GPIO_PIN_0, GPIO_PIN_1, GPIO_PIN_2, GPIO_PIN_3};
+    
+    for (int i = 0; i < 4; i++) {
+        // 根据计数器决定输出：计数器小于高电平次数则为高，否则为低
+        if (gpio_cycle_counter[i] < gpio_pin_high_times[i]) {
+            HAL_GPIO_WritePin(GPIOC, pins[i], GPIO_PIN_SET);
+        } else {
+            HAL_GPIO_WritePin(GPIOC, pins[i], GPIO_PIN_RESET);
+        }
+        
+        // 计数器递增
+        gpio_cycle_counter[i]++;
+        if (gpio_cycle_counter[i] >= GPIO_CYCLE_MAX) {
+            gpio_cycle_counter[i] = 0;
+        }
+    }
+    
+    // 显示界面
+    OLED_Clear(0);
+    
+    // 显示标题
+    OLED_ShowString(0, 0, "GPIO Test", 16);
+    
+    // 显示引脚信息
+    OLED_ShowString(0, 16, "10 cycles PWM", 12);
+    
+    // 显示各引脚高电平次数
+    char str[30];
+    sprintf(str, "P0:%d P1:%d P2:%d P3:%d", 
+            gpio_pin_high_times[0], gpio_pin_high_times[1], 
+            gpio_pin_high_times[2], gpio_pin_high_times[3]);
+    OLED_ShowString(0, 28, str, 12);
+    
+    // 显示当前计数器
+    sprintf(str, "C0:%d C1:%d C2:%d C3:%d", 
+            gpio_cycle_counter[0], gpio_cycle_counter[1],
+            gpio_cycle_counter[2], gpio_cycle_counter[3]);
+    OLED_ShowString(0, 40, str, 12);
+    
+    // 显示提示
+    OLED_ShowString(0, 52, "Auto running...", 12);
+    OLED_ShowString(0, 64, "Long press to exit", 12);
+    
+    OLED_Refresh();
+}
+
+/**
+ * @brief 显示主菜单
+ * @note 原来的样式，垂直列表布局，支持滚动
+ */
+static void Menu_DisplayMainMenu(void) {
+    OLED_Clear(0);
+    
+    // 垂直行布局参数
+    #define MAX_VISIBLE_ITEMS 4  // 16字大小对应4行
+    
+    // 计算滚动偏移量
+    uint8_t scroll_offset = 0;
+    if (menuState.currentItem >= MAX_VISIBLE_ITEMS) {
+        scroll_offset = menuState.currentItem - MAX_VISIBLE_ITEMS + 1;
+    }
+    
+    // 垂直行布局，每个菜单项占一行，16字大小
+    for (uint8_t i = 0; i < MAIN_MENU_ITEM_COUNT; i++) {
+        // 只显示在可见范围内的菜单项
+        if (i >= scroll_offset && i < scroll_offset + MAX_VISIBLE_ITEMS) {
+            uint8_t display_row = i - scroll_offset;
+            if (i == menuState.currentItem) {
+                // 显示选中的菜单项（带方框标记）
+                OLED_ShowString(0, display_row * 2, "[", 16);
+                OLED_ShowString(12, display_row * 2, mainMenuItems[i].name, 16);
+                OLED_ShowString(112, display_row * 2, "]", 16);
+            } else {
+                // 显示未选中的菜单项
+                OLED_ShowString(12, display_row * 2, mainMenuItems[i].name, 16);
+            }
+        }
+    }
+    
+    OLED_Refresh();
+}
+
+/**
+ * @brief 显示当前页面
+ */
+static void Menu_DisplayCurrentPage(void) {
+    switch (menuState.currentPage) {
+        case MENU_PAGE_MAIN:
+            Menu_DisplayMainMenu();
+            break;
+        case MENU_PAGE_GYRO:
+            Menu_DisplayGyroPage();
+            break;
+        case MENU_PAGE_EC11_TEST:
+            Menu_DisplayEc11TestPage();
+            break;
+        case MENU_PAGE_TOF_TEST:
+            Menu_DisplayTofTestPage();
+            break;
+        case MENU_PAGE_REMOTE_KEY_TEST:
+            Menu_DisplayRemoteKeyTestPage();
+            break;
+        case MENU_PAGE_MOTOR_TEST:
+            Menu_DisplayMotorTestPage();
+            break;
+        case MENU_PAGE_ENCODER_TEST:
+            Menu_DisplayEncoderTestPage();
+            break;
+        case MENU_PAGE_ADC_TEST:
+            Menu_DisplayAdcTestPage();
+            break;
+        case MENU_PAGE_PS2_TEST:
+            Menu_DisplayPS2TestPage();
+            break;
+        case MENU_PAGE_PS2_CONTROL:
+            Menu_DisplayPS2ControlPage();
+            break;
+        case MENU_PAGE_GPIO_TEST:
+            Menu_DisplayGPIOTestPage();
+            break;
+        default:
+            Menu_DisplayMainMenu();
+            break;
+    }
+}
