@@ -13,8 +13,8 @@
 // 航模PWM参数定义 (50Hz)
 #define SERVO_PWM_FREQ      50      // 50Hz频率
 #define SERVO_PWM_PERIOD    20000   // 20ms周期对应的计数值 (1MHz计数频率)
-#define SERVO_PWM_MIN       1000    // 1ms最小脉宽
-#define SERVO_PWM_MAX       2000    // 2ms最大脉宽
+#define SERVO_PWM_MIN       500    // 1ms最小脉宽
+#define SERVO_PWM_MAX       2500    // 2ms最大脉宽
 #define SERVO_PWM_MID       1500    // 1.5ms中位脉宽
 
 /**
