@@ -207,7 +207,7 @@ void OLED_DrawPoint(u8 x, u8 y, u8 t)
 		return;	 // 超出范围
 	pos = y / 8; // 将y坐标转换为page，page 0对应顶部，page 7对应底部
 	bx = y % 8;
-	temp = 1 << (7 - bx); // bit7对应点0，bit0对应点7
+	temp = 1 << bx; // bit0对应点0，bit7对应点7
 	if (t)
 		OLED_GRAM[x][pos] |= temp; // 设置点
 	else
@@ -229,7 +229,7 @@ void OLED_Fill(u8 x1, u8 y1, u8 x2, u8 y2, u8 dot)
 		{
 			pos = y / 8; // 将y坐标转换为page
 			bx = y % 8;
-			temp = 1 << (7 - bx); // bit7对应点0，bit0对应点7
+			temp = 1 << bx; // bit0对应点0，bit7对应点7
 			if (dot)
 				OLED_GRAM[x][pos] |= temp; // 设置点
 			else
