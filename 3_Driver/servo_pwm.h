@@ -17,6 +17,9 @@
 #define SERVO_PWM_MAX       2500    // 2ms最大脉宽
 #define SERVO_PWM_MID       1500    // 1.5ms中位脉宽
 
+// 频率高性能模式
+#define SERVO_HIGHPERF_MODE 1
+
 /**
  * @brief  舵机/航模PWM初始化
  * @note   重新配置TIM3为50Hz，启动4路PWM输出
