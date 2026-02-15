@@ -85,7 +85,7 @@ static void Menu_DisplayCurrentPage(void);
  * @param value: 摇杆值 (0-255, 128为中位)
  */
 static void DrawStickBar(u8 x, u8 y, u8 width, u8 value) {
-    u8 height = 6;  // 进度条高度
+    u8 height = 8;  // 进度条高度
     u8 center_x = x + width / 2;  // 中心位置（中位点）
     
     // 绘制外框
@@ -954,9 +954,9 @@ static void Menu_DisplayPS2ControlPage(void) {
         servo_initialized = 1;
     }
     
-    // 读取PS2数据
-    AX_PS2_ScanKey(&ps2_joystick);
-    
+    // 读取PS2数据，带死区处理
+    AX_PS2_ScanKey_Deadzone(&ps2_joystick);
+
     // 摇杆值(0-255)转换为PWM脉宽(1000-2000us)，128为中位
     // 公式: pulse = 1500 + (stick - 128) * 500 / 127
     // 左摇杆Y -> B1
@@ -969,12 +969,8 @@ static void Menu_DisplayPS2ControlPage(void) {
     uint16_t right_x_pwm = 1500 + (int16_t)(ps2_joystick.RJoy_LR - 128) * 500 / 127;
     
     // 设置死区，避免摇杆中位时的抖动
-    #define PWM_DEADZONE 30
-    if (abs((int16_t)left_y_pwm - 1500) < PWM_DEADZONE) left_y_pwm = 1500;
-    if (abs((int16_t)left_x_pwm - 1500) < PWM_DEADZONE) left_x_pwm = 1500;
-    if (abs((int16_t)right_y_pwm - 1500) < PWM_DEADZONE) right_y_pwm = 1500;
-    if (abs((int16_t)right_x_pwm - 1500) < PWM_DEADZONE) right_x_pwm = 1500;
-    
+    // 死区设置在摇杆里
+
     // 设置PWM输出
     Servo_Pwm_SetPulse(SERVO_PWM_CH_B1, left_y_pwm);
     Servo_Pwm_SetPulse(SERVO_PWM_CH_B0, left_x_pwm);
@@ -984,19 +980,19 @@ static void Menu_DisplayPS2ControlPage(void) {
     // 使用16号字体，每行占2个page（16像素高度）
     // 第0-1行：LX（左摇杆X轴）
     OLED_ShowString(0, 0, "LX:", 16);
-    DrawStickBar(28, 0, 100, ps2_joystick.LJoy_LR);
+    DrawStickBar(28, 4, 100, ps2_joystick.LJoy_LR);
     
     // 第2-3行：LY（左摇杆Y轴）
     OLED_ShowString(0, 2, "LY:", 16);
-    DrawStickBar(28, 16, 100, ps2_joystick.LJoy_UD);
+    DrawStickBar(28, 20, 100, ps2_joystick.LJoy_UD);
     
     // 第4-5行：RX（右摇杆X轴）
     OLED_ShowString(0, 4, "RX:", 16);
-    DrawStickBar(28, 32, 100, ps2_joystick.RJoy_LR);
+    DrawStickBar(28, 36, 100, ps2_joystick.RJoy_LR);
     
     // 第6-7行：RY（右摇杆Y轴）
     OLED_ShowString(0, 6, "RY:", 16);
-    DrawStickBar(28, 48, 100, ps2_joystick.RJoy_UD);
+    DrawStickBar(28, 52, 100, ps2_joystick.RJoy_UD);
     
     OLED_Refresh();
 }

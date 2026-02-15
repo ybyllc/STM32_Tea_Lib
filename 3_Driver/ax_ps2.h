@@ -69,29 +69,23 @@
 typedef struct			 				
 {
   uint8_t mode;		    /* 手柄的工作模式 */
-
   uint8_t btn1;         /* B0:SLCT B1:JR  B0:JL B3:STRT B4:UP B5:R B6:DOWN  B7:L   */
-
   uint8_t btn2;         /* B0:L2   B1:R2  B2:L1 B3:R1   B4:Y  B5:B B6:A     B7:X */
-
   uint8_t RJoy_LR;      /* 右摇杆X  0x00 = 左    0xff = 右   */
-
   uint8_t RJoy_UD;      /* 右摇杆Y  0x00 = 上    0xff = 下   */
-
   uint8_t LJoy_LR;      /* 左摇杆X  0x00 = 左    0xff = 右   */
-
   uint8_t LJoy_UD;      /* 左摇杆Y  0x00 = 上    0xff = 下   */
-	
 }JOYSTICK_TypeDef;
-
 
 /*** PS2游戏手柄驱动函数 **********/
 void AX_PS2_Init(void);  //PS2初始化
 void AX_PS2_ScanKey(JOYSTICK_TypeDef* JoystickStruct);//PS2读取按键和摇杆数据
-void AX_PS2_ScanKeyVibration(JOYSTICK_TypeDef* JoystickStruct, uint8_t motor1, uint8_t motor2); //PS2读取按键和摇杆数据（带震动）
+void AX_PS2_ScanKey_Deadzone(JOYSTICK_TypeDef *JoystickStruct);//PS2读取按键和摇杆数据（带死区处理）
 void AX_PS2_SetInit(void);  //PS2设置初始化（开启模拟模式和震动）
 void AX_PS2_Vibration(uint8_t motor1, uint8_t motor2); //PS2震动控制
 void AX_PS2_DebugScan(void); //PS2详细调试扫描
+
+#define STICK_DEADZONE 16  // 摇杆死区
 
 #endif 
 

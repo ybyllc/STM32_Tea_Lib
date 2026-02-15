@@ -176,6 +176,52 @@ void AX_PS2_ScanKey(JOYSTICK_TypeDef *JoystickStruct)
 }
 
 /**
+  * @函  数  去除死区
+  * @参  数  *JoystickStruct 手柄数据结构体
+  * @返回值  无
+  */
+void AX_PS2_ScanKey_Deadzone(JOYSTICK_TypeDef *JoystickStruct)
+{
+    AX_PS2_ScanKey(JoystickStruct);
+
+    // 右摇杆X去死区处理 (0-255范围，128为中位)
+    if (JoystickStruct->RJoy_LR > 128 + STICK_DEADZONE) {
+        JoystickStruct->RJoy_LR = 128 + (JoystickStruct->RJoy_LR - (128 + STICK_DEADZONE)) * 127 / (127 - STICK_DEADZONE);
+    } else if (JoystickStruct->RJoy_LR < 128 - STICK_DEADZONE) {
+        JoystickStruct->RJoy_LR = (JoystickStruct->RJoy_LR * 128) / (128 - STICK_DEADZONE);
+    } else {
+        JoystickStruct->RJoy_LR = 128;
+    }
+    
+    // 右摇杆Y去死区处理
+    if (JoystickStruct->RJoy_UD > 128 + STICK_DEADZONE) {
+        JoystickStruct->RJoy_UD = 128 + (JoystickStruct->RJoy_UD - (128 + STICK_DEADZONE)) * 127 / (127 - STICK_DEADZONE);
+    } else if (JoystickStruct->RJoy_UD < 128 - STICK_DEADZONE) {
+        JoystickStruct->RJoy_UD = (JoystickStruct->RJoy_UD * 128) / (128 - STICK_DEADZONE);
+    } else {
+        JoystickStruct->RJoy_UD = 128;
+    }
+    
+    // 左摇杆X去死区处理
+    if (JoystickStruct->LJoy_LR > 128 + STICK_DEADZONE) {
+        JoystickStruct->LJoy_LR = 128 + (JoystickStruct->LJoy_LR - (128 + STICK_DEADZONE)) * 127 / (127 - STICK_DEADZONE);
+    } else if (JoystickStruct->LJoy_LR < 128 - STICK_DEADZONE) {
+        JoystickStruct->LJoy_LR = (JoystickStruct->LJoy_LR * 128) / (128 - STICK_DEADZONE);
+    } else {
+        JoystickStruct->LJoy_LR = 128;
+    }
+    
+    // 左摇杆Y去死区处理
+    if (JoystickStruct->LJoy_UD > 128 + STICK_DEADZONE) {
+        JoystickStruct->LJoy_UD = 128 + (JoystickStruct->LJoy_UD - (128 + STICK_DEADZONE)) * 127 / (127 - STICK_DEADZONE);
+    } else if (JoystickStruct->LJoy_UD < 128 - STICK_DEADZONE) {
+        JoystickStruct->LJoy_UD = (JoystickStruct->LJoy_UD * 128) / (128 - STICK_DEADZONE);
+    } else {
+        JoystickStruct->LJoy_UD = 128;
+    }
+}
+
+/**
   * @函  数  PS2读取按键和摇杆数据（带震动）
   * @参  数  *JoystickStruct 手柄数据结构体
   *         motor1: 大电机震动强度 (0-255)
