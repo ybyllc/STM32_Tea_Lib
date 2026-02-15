@@ -21,6 +21,7 @@ typedef enum {
     MENU_PAGE_ADC_TEST, // ADC测试页面
     MENU_PAGE_PS2_TEST,  // PS2手柄测试页面
     MENU_PAGE_PS2_CONTROL, // PS2控制模式页面
+    MENU_PAGE_SERVO_PWM,  // 舵机调试页面
     MENU_PAGE_GPIO_TEST  // GPIO测试页面（PS2引脚测试）
 } MenuPageType;
 

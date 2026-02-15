@@ -285,6 +285,7 @@ const MenuItem mainMenuItems[] = {
     {"ADC Test", MENU_PAGE_ADC_TEST},
     {"PS2 Test", MENU_PAGE_PS2_TEST},
     {"PS2 Control", MENU_PAGE_PS2_CONTROL},
+    {"Servo PWM", MENU_PAGE_SERVO_PWM},
     {"GPIO Test", MENU_PAGE_GPIO_TEST}
 };
 
@@ -997,6 +998,72 @@ static void Menu_DisplayPS2ControlPage(void) {
     OLED_Refresh();
 }
 
+
+/**
+ * @brief 显示舵机控制界面
+ * @note 舵机运动，按时间转一圈
+ *     （航模PWM模式：50Hz，1000-2000us）
+ *       左摇杆Y->B1, 左摇杆X->B0, 右摇杆Y->A7, 右摇杆X->A6
+ */
+static void Menu_DisplayServoPWMPage(void) {
+    static MenuPageType last_page = MENU_PAGE_MAIN;
+    static uint8_t servo_initialized = 0;
+    
+    // 检测页面切换（从 SERVO_PWM 切换到其他页面）
+    if (last_page == MENU_PAGE_SERVO_PWM && menuState.currentPage != MENU_PAGE_SERVO_PWM) {
+        Servo_Pwm_StopAll();
+    }
+    last_page = menuState.currentPage;
+    
+    // 如果当前不是 SERVO_PWM 页面，直接返回
+    if (menuState.currentPage != MENU_PAGE_SERVO_PWM) {
+        return;
+    }
+    
+    OLED_Clear(0);
+    
+    // 首次进入时初始化PS2和舵机PWM
+    if (!ps2_initialized) {
+        Menu_InitPS2();
+    }
+    if (!servo_initialized) {
+        Servo_Pwm_Init();
+        servo_initialized = 1;
+    }
+    
+    // 定义舵机角度变量
+    static float servo_angle = 90.0f;
+    static float servo_speed = 0.3f;
+
+    // 周期旋转，换向
+    if (servo_angle >= 180 || servo_angle <= 0) servo_speed = -servo_speed;
+
+    servo_angle += servo_speed;
+
+    // 转换为PWM脉宽(500-2500us)
+    uint16_t servo_pwm = 500 + (int16_t)(servo_angle * 2000 / 180);
+
+    // 设置PWM输出
+    Servo_Pwm_SetPulse(SERVO_PWM_CH_B1, servo_pwm);
+    Servo_Pwm_SetPulse(SERVO_PWM_CH_B0, servo_pwm);
+    Servo_Pwm_SetPulse(SERVO_PWM_CH_A7, servo_pwm);
+    Servo_Pwm_SetPulse(SERVO_PWM_CH_A6, servo_pwm);
+    
+    char str[30];
+    // 使用16号字体，每行占2个page（16像素高度）
+    // 第0-1行：Ag（舵机角度）
+    snprintf(str, sizeof(str), "Ag:%.1f", servo_angle);
+    OLED_ShowString(0, 0, str, 16);
+
+    snprintf(str, sizeof(str), "sp:%.1f", servo_speed);
+    OLED_ShowString(0, 2, str, 16);
+
+    // 第4-5行：Ag（舵机角度）
+    DrawStickBar(0, 40 , 128, (servo_angle)/180*256);
+
+    OLED_Refresh();
+}
+
 // GPIO测试引脚状态（用函数调用次数计数）
 static uint8_t gpio_cycle_counter[4] = {0, 0, 0, 0};    // 周期计数器（0-9）
 
@@ -1083,24 +1150,20 @@ static void Menu_DisplayGPIOTestPage(void) {
     OLED_ShowString(0, 0, "GPIO Test", 16);
     
     // 显示引脚信息
-    OLED_ShowString(0, 16, "10 cycles PWM", 12);
-    
+    OLED_ShowString(0, 2, "10 cycles PWM", 16);
+
     // 显示各引脚高电平次数
     char str[30];
-    sprintf(str, "P0:%d P1:%d P2:%d P3:%d", 
-            gpio_pin_high_times[0], gpio_pin_high_times[1], 
-            gpio_pin_high_times[2], gpio_pin_high_times[3]);
-    OLED_ShowString(0, 28, str, 12);
+
+    // 显示各引脚高电平次数
+    sprintf(str, "PC0:%d   PC1:%d", 
+            gpio_pin_high_times[0], gpio_pin_high_times[1]);
+    OLED_ShowString(0, 4, str, 16);
+
+    sprintf(str, "PC2:%d   PC3:%d", 
+        gpio_pin_high_times[2], gpio_pin_high_times[3]);
+    OLED_ShowString(0, 6, str, 16);
     
-    // 显示当前计数器
-    sprintf(str, "C0:%d C1:%d C2:%d C3:%d", 
-            gpio_cycle_counter[0], gpio_cycle_counter[1],
-            gpio_cycle_counter[2], gpio_cycle_counter[3]);
-    OLED_ShowString(0, 40, str, 12);
-    
-    // 显示提示
-    OLED_ShowString(0, 52, "Auto running...", 12);
-    OLED_ShowString(0, 64, "Long press to exit", 12);
     
     OLED_Refresh();
 }
@@ -1175,6 +1238,9 @@ static void Menu_DisplayCurrentPage(void) {
             break;
         case MENU_PAGE_PS2_CONTROL:
             Menu_DisplayPS2ControlPage();
+            break;
+        case MENU_PAGE_SERVO_PWM:
+            Menu_DisplayServoPWMPage();
             break;
         case MENU_PAGE_GPIO_TEST:
             Menu_DisplayGPIOTestPage();
