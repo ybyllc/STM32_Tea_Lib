@@ -1,7 +1,7 @@
 #ifndef _SOFT_IIC_H
 #define _SOFT_IIC_H
 
-#include "hsc.h"
+#include "common.h"
 
 typedef struct {
     GPIO_TypeDef *scl_port;

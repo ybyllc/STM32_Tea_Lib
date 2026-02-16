@@ -2,7 +2,7 @@
 #define _ICM42670_H
 
 #include "stdint.h"
-#include "hsc.h"
+#include "common.h"
 #include "soft_iic.h"
 
 // ICM-42670 I2C 设备地址（7位地址，不包含R/W位）

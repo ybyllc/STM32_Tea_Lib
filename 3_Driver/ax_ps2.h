@@ -44,7 +44,7 @@
 /* Includes ------------------------------------------------------------------*/	 
 //#include "stm32f10x.h"
 #include "main.h"
-#include "hsc.h"
+#include "common.h"
 
 // PS2Òý½Å¶¨Òå
 #define AX_PS2_PORT        GPIOC

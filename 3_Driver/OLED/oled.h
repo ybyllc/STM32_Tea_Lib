@@ -13,7 +13,7 @@
 
 #ifndef __OLED_H
 #define __OLED_H
-#include "hsc.h"
+#include "common.h"
 #include "stdlib.h"
 
 // фад╩Ёъ╢Г

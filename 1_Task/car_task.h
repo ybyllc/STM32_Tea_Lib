@@ -7,7 +7,7 @@
 #ifndef __CAR_TASK_H
 #define __CAR_TASK_H
 
-#include "hsc.h"
+#include "common.h"
 
 // 函数声明
 

@@ -6,7 +6,7 @@
 #ifndef __ENCODER_KNOB_H
 #define __ENCODER_KNOB_H
 
-#include "hsc.h"
+#include "common.h"
 
 void Ec11_knob_Init(void);
 

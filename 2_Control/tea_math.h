@@ -1,7 +1,7 @@
-#ifndef _HSC_MATH_H
-#define _HSC_MATH_H
+#ifndef _TEA_MATH_H
+#define _TEA_MATH_H
 
-#include "hsc.h"	//定义变量类型的头文件
+#include "common.h"	//定义变量类型的头文件
 #include "math.h"
 //智能车要用到的数学函数		//单位为:mm
 

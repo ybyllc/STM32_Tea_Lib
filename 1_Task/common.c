@@ -1,4 +1,4 @@
-#include "hsc.h"
+#include "common.h"
 #include "stdio.h"//printfµÄ¿â
 #include <stdarg.h>
 

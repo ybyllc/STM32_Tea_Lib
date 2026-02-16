@@ -1,5 +1,5 @@
-#ifndef _HSC_H	//
-#define _HSC_H  //避免重复编译，只是自己的取名，只能包含字母和下划线
+#ifndef _COMMON_H	//
+#define _COMMON_H  //避免重复编译，只是自己的取名，只能包含字母和下划线
 #include "stm32f4xx_hal.h"
 #include "main.h"
 

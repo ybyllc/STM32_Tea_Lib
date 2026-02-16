@@ -8,7 +8,7 @@
 #define REMOTE_KEY_H
 
 #include <stdint.h>
-#include "hsc.h"
+#include "common.h"
 
 // 按键枚举
 typedef enum {

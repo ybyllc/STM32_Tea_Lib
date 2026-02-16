@@ -16,7 +16,7 @@
 #include "oled.h"
 #include "stdlib.h"
 #include "oledfont.h"
-#include "hsc.h"
+#include "common.h"
 // OLED显存
 // 存储格式如下.
 //[0]0 1 2 3 ... 127

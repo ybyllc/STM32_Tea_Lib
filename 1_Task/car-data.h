@@ -4,7 +4,7 @@
 //***************导入库函数************
 //来自逐飞的基础库
 
-#include "hsc.h" //hsc的基础头文件
+#include "common.h" //hsc的基础头文件
 #include "motor-m.h"	//电机驱动
 #include "wit_gyro_sdk.h"	//维特陀螺仪
 

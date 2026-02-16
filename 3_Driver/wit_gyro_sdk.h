@@ -9,7 +9,7 @@ extern "C" {
 #include <stdio.h>
 #include <string.h>
 #include "wit_REG.h"
-//#include "hsc.h"
+//#include "common.h"
 
 // //公共变量文件
 // #include "public.h"

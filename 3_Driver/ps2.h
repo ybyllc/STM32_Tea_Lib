@@ -1,7 +1,7 @@
 #ifndef __PS2_H
 #define __PS2_H
 #include "main.h"
-#include "hsc.h"
+#include "common.h"
 
 /*********************************************************
 Copyright (C), 2015-2025, YFRobot.
@@ -14,15 +14,14 @@ Description: PS2驱动程序
 // PS2引脚定义
 #define PS2_DI_PORT     GPIOC
 #define PS2_DI_PIN      GPIO_PIN_0    // 输入 DAT
-
 #define PS2_DO_PORT     GPIOC
 #define PS2_DO_PIN      GPIO_PIN_1    // 输出 CMD
-
 #define PS2_CS_PORT     GPIOC
 #define PS2_CS_PIN      GPIO_PIN_2    // 输出 CS
-
 #define PS2_CLK_PORT    GPIOC
 #define PS2_CLK_PIN     GPIO_PIN_3    // 输出 CLK
+
+#define PS2_Delayus(n) Delay_us(n)
 
 // 使用HAL库函数操作GPIO
 #define DI   HAL_GPIO_ReadPin(PS2_DI_PORT, PS2_DI_PIN)           //输入 DAT
