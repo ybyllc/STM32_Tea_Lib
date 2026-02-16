@@ -1,345 +1,140 @@
-//PIDµÄ¹¦ÄÜ
-#include "PID.h"
-#include "main.h"
-#include "car-data.h"
-#include "hsc_math.h"
+/**
+ ******************************************************************************
+ * @file    pid.c
+ * @brief   PIDç®—æ³•
+ * 
+ * @details æœ¬æ–‡ä»¶å®ç°äº†ä½ç½®å¼å’Œå¢é‡å¼ä¸¤ç§PIDæ§åˆ¶ç®—æ³•ï¼š
+ *          - PID_Calc():          å¢é‡å¼PIDï¼ˆé»˜è®¤ï¼Œé€‚åˆå•ç‰‡æœºï¼‰
+ *          - PID_Position_Calc(): ä½ç½®å¼PID
+ *          - PID_test():          æœ€ç®€å•çš„å­¦ä¹ ç”¨PIDï¼ˆå†…ç½®staticå˜é‡ï¼‰
+ ******************************************************************************
+ */
 
-//°üº¬£º
-//4¸öµç»úµÄPIDµÄ¼ÆËã
-//ÍÓÂİÒÇÁ½¸ö»·µÄ¼ÆËã£¨Ô­µØĞı×ªºÍÖ±Ïß½ÃÕı£©
-//¼ÓÈë»ºÂı¼ÓËÙ
-//Î»ÖÃ»·µÄPID
-//float	p_P=5.5;//ºá×ß3  //Ö»¾ö¶¨¿ªÊ¼¼õËÙµÄ¾àÀë 300mm
-//float	p_I=0;
-//float	p_D=10;//1
-//u16		p_PIDmax=2000;//*** Ğ¡³µÇ°½øµÄËÙ¶È Ã¿Ãëmm ** //¼«ÏŞ4300
+#include "pid.h"
 
-//½Ç¶È»·µÄPID
-float	a1_P=6;	   //ÊäÈë 1¡ã
-float	a1_I=0;
-float	a1_D=5;
-u16		a1_PIDmax=600;//Ğı×ªËÙ¶ÈÏŞÖÆ  Ã¿ÃëËÙ¶Èmm
-
-////Ğı×ª»·µÄPID
-//float	a_P=40;//50	   //ÊäÈë 1¡ã
-//float	a_I=0;
-//float	a_D=100;
-//u16		a_PIDmax=1300;//Ğı×ªËÙ¶ÈÏŞÖÆ  Ã¿ÃëËÙ¶Èmm
-
-
-//////ËÙ¶È»·µÄPID
-//float P[4]={2.5,2.5,2.5,2.5}; 
-//float I[4]={1.2,0.8,0.8,0.8};  
-//float D[4]={  1,  1,  1,0.8};
-//u16	    PIDmax=4000;
-
-//////Îª2000ËÙ¶Èµ÷µÄ²ÎÊı  ºáÏò   //»ù×¼ 2200
-//u16	PIDmax1[4]={4000,4000,4000,4000};//µç»úPWMÇ°½øÏŞ·ù ¾ö¶¨¼ÓËÙ¶È ÉÏÏŞ10000
-//int	PIDmax0[4]={-4000,-4000,-4000,-4000};//µç»úPWMºóÍËÏŞ·ù ¾ö¶¨ºóÍË¼ÓËÙ¶È ÉÏÏŞ10000   µç»ú2ÊÇÕæÂı
-
-////½ÃÕı»·µÄPID
-//float s_P[4]={5  ,5  ,5  ,5  }; 
-//float s_I[4]={0.1,0.1,0.1,0.1};  
-//float s_D[4]={  4,  4,  4,  4};
-//u16	search_max=2000;//µç»úPWMÏŞ·ù
-
-////ºáÏò Ç° ¡ü ¡ı  ºó ¡ı ¡ü
-////		  ¡ı ¡ü 	  ¡ü ¡ı
-
-void PID_init()
+/**
+ * @brief   PIDåˆå§‹åŒ–å‡½æ•°
+ * @param   pid        - PIDç»“æ„ä½“æŒ‡é’ˆ
+ * @param   kp         - æ¯”ä¾‹ç³»æ•°
+ * @param   ki         - ç§¯åˆ†ç³»æ•°
+ * @param   kd         - å¾®åˆ†ç³»æ•°
+ * @param   out_max    - æœ€å¤§è¾“å‡ºå€¼
+ * @param   out_min    - æœ€å°è¾“å‡ºå€¼
+ * @retval  æ— 
+ * @note    ä½¿ç”¨å‰å¿…é¡»å…ˆè°ƒç”¨æ­¤å‡½æ•°åˆå§‹åŒ–PIDå‚æ•°
+ */
+void PID_Init(PID_t *pid, float kp, float ki, float kd, float out_max, float out_min)
 {
-	//pidmode = stop;
-//	//ËÙ¶È»·³õÊ¼»¯
-//	PID_struct_init(&pid_data_spd[0],Position_Pid,PIDmax,2000,10000,P[0],I[0],D[0]);  //³õÊ¼»¯ pid²ÎÊı ÎªÔöÁ¿Ê½Êä³ö  ×î´óÊä³öÖµ »ı·ÖÏîÏŞ »ı·Ö·ÖÀë×ªËÙÖµ}
-//	PID_struct_init(&pid_data_spd[1],Position_Pid,PIDmax,2000,10000,P[1],I[1],D[1]);
-//	PID_struct_init(&pid_data_spd[2],Position_Pid,PIDmax,2000,10000,P[2],I[2],D[2]);
-//	PID_struct_init(&pid_data_spd[3],Position_Pid,PIDmax,2000,10000,P[3],I[3],D[3]);
-//	
-//	//Î»ÖÃ»·³õÊ¼»¯  Ã¿¸öÂÖ×Ó 
-//	for(int i=0;i<4;i++) 
-//	{
-//		PID_struct_init(&pid_data_pla[i],Position_Pid,p_PIDmax,0,0,p_P,p_I,p_D);  //½á¹û/10£¿
-//		pid_pla[i].target=0;
-//	}
-		
-//	//½Ç¶È»·³õÊ¼»¯
-//	PID_struct_init(&pid_data_ang[0],Position_Pid,a1_PIDmax,0,0,a1_P,0,a1_D); 
-	//Ğı×ª»·³õÊ¼»¯
-	PID_struct_init(&pid_data_ang[1],Position_Pid,a1_PIDmax,0,0,a1_P,0,a1_D); 
-//	
-//	//ËÑË÷»·³õÊ¼»¯
-//	PID_struct_init(&pid_data_sch[0],Position_Pid,search_max,1500,5000,s_P[0],s_I[0],s_D[0]);  //³õÊ¼»¯ pid²ÎÊı ÎªÔöÁ¿Ê½Êä³ö  ×î´óÊä³öÖµ »ı·ÖÏîÏŞ »ı·Ö·ÖÀë×ªËÙÖµ}
-//	PID_struct_init(&pid_data_sch[1],Position_Pid,search_max,1500,5000,s_P[1],s_I[1],s_D[1]);
-//	PID_struct_init(&pid_data_sch[2],Position_Pid,search_max,1500,5000,s_P[2],s_I[2],s_D[2]);
-//	PID_struct_init(&pid_data_sch[3],Position_Pid,search_max,1500,5000,s_P[3],s_I[3],s_D[3]);
+    pid->kp = kp;
+    pid->ki = ki;
+    pid->kd = kd;
+    
+    pid->target = 0.0f;
+    pid->measure = 0.0f;
+    
+    pid->err = 0.0f;
+    pid->err_last = 0.0f;
+    pid->err_llast = 0.0f;
+    pid->err_sum = 0.0f;
+    
+    pid->out = 0.0f;
+    pid->out_last = 0.0f;
+    pid->out_max = out_max;
+    pid->out_min = out_min;
 }
 
-
-////==================================PID¼ÆËã===================== Ã¿10msËãÒ»´Î
-//int slow_start;//»ºÂı¼ÓËÙµÄ±êÊ¶·û
-//int pid_outmax=0;//ËÙ¶È»·µ±Ç°×î´óÊä³ö
-
-
-void pid_cal(u8 mode)
+/**
+ * @brief   PIDé‡ç½®å‡½æ•°
+ * @param   pid        - PIDç»“æ„ä½“æŒ‡é’ˆ
+ * @retval  æ— 
+ * @note    å½“éœ€è¦é‡æ–°å¼€å§‹æ§åˆ¶æ—¶è°ƒç”¨ï¼Œæ¸…é™¤å†å²è¯¯å·®
+ */
+void PID_Reset(PID_t *pid)
 {
-	u8 num; // ÂÖ×ÓµÄĞòºÅ
-	//Get_Ang(); // »ñÈ¡ÍÓÂİÒÇ½Ç¶È
-	float car_ang;
-	car_ang=fAngle[2];
-	
-//	Get_Encoder(); // »ñÈ¡±àÂëÆ÷
-//	
-//	// ¼ÆËãËÙ¶È
-//	for (num = 0; num < 4; num++)
-//	{
-//		motor_speed[num] = (lunzi * Encoder[num] / 1024.0 * 30 / 70) / 0.010; // ³µÂÖËÙ¶È»»Ëã£¨µ÷
-//	// Ã¿ÃëËÙ¶Èmm = ÂÖ×ÓÖÜ³¤ *±àÂëÆ÷Êı/±àÂëÆ÷Ò»È¦ 	//»¹ÓĞÂÖ³İ±È		Ğ¡ÂÖ30 ´óÂÖ³İÊı70
-//		
-//		motor_mm[num] += motor_speed[num]* 0.010; //µç»úÒÑĞĞÊ»µÄÂ·³Ì
-//	}
-	
-//	// ³µÁ¾Í£Ö¹    0
-//	if (pidmode == stop)
-//	{
-//		for (num = 0; num < 4; num++)
-//		{
-//			pid_spd[num].target = 0; // µç»úÄ¿±ê
-
-//			pid_spd[num].pid_get = motor_speed[num];
-//			pid_spd[num].pid_out = pid_calc(&pid_data_spd[num], pid_spd[num].pid_get, pid_spd[num].target); // Êä³öµç»ú
-//		}
-//		Motor_Set(pid_spd[0].pid_out,pid_spd[1].pid_out,pid_spd[2].pid_out,pid_spd[3].pid_out);
-//	}
-
-//	// Î»ÖÃ»·pid  ======  1
-//	if (pidmode == place_mode)
-//	{
-//		//***Î»ÖÃ»·
-//		
-//		//**µç»ú»ºÂı¼ÓËÙ¹¦ÄÜ
-//		if(slow_start != 0)
-//		{
-//			pid_outmax=0;//Ã¿´Î°Ñ×î´óËÙ¶ÈÖØÖÃ
-//			slow_start=1;
-//		}
-//		if(pid_outmax < PIDmax)
-//			pid_outmax  +=75;//70-80
-//		
-//		for (num = 0; num < 4; num++) // µç»ú1-4·Ö±ğ¼ÆËã
-//		{
-//			// ÊäÈëÂ·³Ì
-//			pid_pla[num].pid_get = (int)motor_mm[num];
-//			
-//			// Êä³öÄ¿±êËÙ¶È
-//			pid_pla[num].pid_out = pid_calc(&pid_data_pla[num], pid_pla[num].pid_get, pid_pla[num].target);
-
-//			//**»ºÂı¼ÓËÙ¹¦ÄÜ
-//			if(pid_pla[num].pid_out>pid_outmax) pid_pla[num].pid_out=pid_outmax;
-//			
-//			if(pid_pla[num].pid_out<-pid_outmax) pid_pla[num].pid_out=-pid_outmax;
-
-// 			// ÊäÈëÄ¿±êËÙ¶È£¨Î»ÖÃ»·+ËÙ¶È»·£©
-//			pid_spd[num].target = pid_pla[num].pid_out;
-
-//		}
-//		
-//		//***ºÜĞ¡µÄ½Ç¶È»·  ±ÜÃâÅÜÆ«
-//		// ÊäÈë½Ç¶È(»ñÈ¡ÍÓÂİÒÇµÄÖµ),Êä³öĞ¡³µĞı×ªËÙ¶È
-//		pid_ang[0].pid_get = car_ang;
-//		pid_ang[0].pid_out = pid_calc(&pid_data_ang[0], pid_ang[0].pid_get, pid_ang[0].target);
-
-//		// ×ª¶¯³µÂÖ·½Ïò£º ¨J ¨K -
-//		//				  ¨I ¨L -
-//		pid_spd[0].target += pid_ang[0].pid_out;	 // ×óÇ°Çı¶¯
-//		pid_spd[1].target += -pid_ang[0].pid_out; // ÓÒÇ°
-//		pid_spd[2].target += pid_ang[0].pid_out;	 // ÓÒºó
-//		pid_spd[3].target += -pid_ang[0].pid_out; // ×óºó		
-//		
-//		//***Î»ÖÃ-ËÙ¶È»·
-//		for (num = 1; num <= 4; num++) // µç»ú1-4·Ö±ğ¼ÆËã
-//		{
-//			
-//			// ÊäÈëµ±Ç°ËÙ¶È
-//			pid_spd[num].pid_get = motor_speed[num];
-//			
-//			// ¼ÆËãËÙ¶ÈµÄPID
-//			pid_spd[num].pid_out = pid_calc(&pid_data_spd[num], pid_spd[num].pid_get, pid_spd[num].target);
-//		
-//		}
-//		//Âí´ïÆô¶¯
-//		Motor_Set(pid_spd[0].pid_out,pid_spd[1].pid_out,pid_spd[2].pid_out,pid_spd[3].pid_out);
-//	}
-		
-	// ½Ç¶È»·µÄpid  ======  2
-	if (1)//pidmode == angle_mode)
-	{
-		// »ñÈ¡ÍÓÂİÒÇ½Ç¶È, ¿ªÊ¼¼ÆËã
-		pid_ang[1].pid_get = min_angle(car_ang,pid_ang[1].target);//×îĞ¡Ğı×ª½Ç
-		pid_ang[1].pid_out = pid_calc(&pid_data_ang[1], pid_ang[1].pid_get, pid_ang[1].target);
-
-		//Ì×ÉÏ+ËÙ¶È»·
-//		// ×ª¶¯³µÂÖ·½Ïò£º¨J ¨K -
-//		//				 ¨I ¨L -
-//		pid_spd[0].target = pid_ang[1].pid_out;  // ×óÇ°Çı¶¯
-//		pid_spd[1].target = -pid_ang[1].pid_out; // ÓÒÇ°
-//		pid_spd[2].target = pid_ang[1].pid_out;  // ÓÒºó
-//		pid_spd[3].target = -pid_ang[1].pid_out; // ×óºó
-//		for (num = 0; num < 4; num++)						   // µç»ú1-4·Ö±ğ¼ÆËãËÙ¶È
-//		{
-
-//			// ÊäÈëµ±Ç°ËÙ¶È
-//			pid_spd[num].pid_get = motor_speed[num];
-
-//			// ¼ÆËãËÙ¶ÈµÄPID
-//			pid_spd[num].pid_out = pid_calc(&pid_data_spd[num], pid_spd[num].pid_get, pid_spd[num].target);
-//		}
-//		//Âí´ïÆô¶¯
-//		Motor_Set(pid_spd[0].pid_out,pid_spd[1].pid_out,pid_spd[2].pid_out,pid_spd[3].pid_out);
-
-	if(ABS(pid_ang[1].pid_out)>200)
-		Motor_Set(-pid_ang[1].pid_out,pid_ang[1].pid_out,-pid_ang[1].pid_out,pid_ang[1].pid_out);
-	}
-	
-
-//	// ´¿ËÙ¶È»·£¬²âÊÔÓÃ  ====== 3
-//	if (pidmode == speed_mode)
-//	{
-//		for (num = 0; num <= 3; num++) // µç»ú1-4·Ö±ğ¼ÆËãËÙ¶È
-//		{
-//			// ÊäÈëµ±Ç°ËÙ¶È
-//			pid_spd[num].pid_get = motor_speed[num];
-
-//			// ¼ÆËãËÙ¶ÈµÄPID
-//			pid_spd[num].pid_out = pid_calc(&pid_data_spd[num], pid_spd[num].pid_get, pid_spd[num].target);
-//			
-//			//PWM×î´óÏŞ·ù
-//			//µç»úPWMÇ°½øÏŞ·ù ¾ö¶¨¼ÓËÙ¶È
-//			if(pid_spd[num].pid_out > PIDmax1[num]) pid_spd[num].pid_out = PIDmax1[num-1];
-//			//µç»úPWMºóÍËÏŞ·ù ¾ö¶¨ºóÍË¼ÓËÙ¶È			
-//			if(pid_spd[num].pid_out < PIDmax0[num]) pid_spd[num].pid_out = PIDmax0[num-1];	
-//		}
-//		Motor_Set(pid_spd[0].pid_out,pid_spd[1].pid_out,pid_spd[2].pid_out,pid_spd[3].pid_out);
-
-//	}
-//	
-//	// ºáÏòÒÆ¶¯
-//	if (pidmode == xmove_mode)
-//	{
-//		// ÒÆ¶¯·½Ïò£º   -¡ú
-//		// ×ª¶¯³µÂÖ·½Ïò£º ¨J ¨I -
-//		//				  ¨I ¨J -
-//		//***Î»ÖÃ»·
-//		
-//		//**µç»ú»ºÂı¼ÓËÙ¹¦ÄÜ
-//		if(slow_start != 0)
-//		{
-//			pid_outmax=0;//Ã¿´Î°Ñ×î´óËÙ¶ÈÖØÖÃ
-//			slow_start=1;
-//		}
-//		if(pid_outmax < PIDmax)
-//			pid_outmax  +=20;	//ËÙ¶ÈÃ¿5msÔö³¤20
-
-//		for (num = 0; num < 4; num++) // µç»ú1-4·Ö±ğ¼ÆËã
-//		{
-//			// ÊäÈëÂ·³Ì
-//			pid_pla[num].pid_get = motor_mm[num];
-//			
-//			// Êä³öÄ¿±êËÙ¶È
-//			pid_pla[num].pid_out = pid_calc(&pid_data_pla[num], pid_pla[num].pid_get, pid_pla[num].target);
-//			
-//			//**Æğ²½»ºÂı¼ÓËÙ
-//			if(pid_pla[num].pid_out>pid_outmax) pid_pla[num].pid_out=pid_outmax;
-//			
-//			if(pid_pla[num].pid_out<-pid_outmax) pid_pla[num].pid_out=-pid_outmax;
-//			
-//			pid_spd[num].target = pid_pla[num].pid_out;
-//			
-//		}
-//		
-//		//***ºÜĞ¡µÄ½Ç¶È»·  ±ÜÃâÅÜÆ«
-//		// ÊäÈë½Ç¶È(»ñÈ¡ÍÓÂİÒÇµÄÖµ),Êä³öĞ¡³µĞı×ªËÙ¶È
-//		pid_ang[0].pid_get = car_ang;
-//		pid_ang[0].pid_out = pid_calc(&pid_data_ang[0], pid_ang[0].pid_get, pid_ang[0].target);
-
-//		// ×ª¶¯³µÂÖ·½Ïò£º ¨J ¨K -
-//		//				  ¨I ¨L -
-//		pid_spd[0].target += pid_ang[0].pid_out;	 // ×óÇ°Çı¶¯
-//		pid_spd[1].target -= pid_ang[0].pid_out; // ÓÒÇ°
-//		pid_spd[2].target += pid_ang[0].pid_out;	 // ÓÒºó
-//		pid_spd[3].target -= pid_ang[0].pid_out; // ×óºó		
-//		
-//		//***Î»ÖÃ-ËÙ¶È»·
-//		for (num = 0; num < 4; num++) // µç»ú1-4·Ö±ğ¼ÆËã
-//		{
-//			// ÊäÈëµ±Ç°ËÙ¶È
-//			pid_spd[num].pid_get = motor_speed[num];
-//			// ¼ÆËãËÙ¶ÈµÄPID
-//			pid_spd[num].pid_out = pid_calc(&pid_data_spd[num], pid_spd[num].pid_get, pid_spd[num].target);
-//			
-//			//µç»úPWMÇ°½øÏŞ·ù ¾ö¶¨¼ÓËÙ¶È
-//			if(pid_spd[num].pid_out > PIDmax1[num]) pid_spd[num].pid_out = PIDmax1[num];
-//			//µç»úPWMºóÍËÏŞ·ù ¾ö¶¨ºóÍË¼ÓËÙ¶È			
-//			if(pid_spd[num].pid_out < PIDmax0[num]) pid_spd[num].pid_out = PIDmax0[num];	
-//		
-//		}
-//		//Âí´ïÆô¶¯
-//		Motor_Set(pid_spd[0].pid_out,pid_spd[1].pid_out,pid_spd[2].pid_out,pid_spd[3].pid_out);
-//		
-//	}
-//	
-//	
-//	//ËÑË÷»·
-//	//ÓÃÓÚart¶ÔÄ¿±êµÄ¶¨Î»
-//	if (pidmode == search_mode)
-//	{
-//		// ÒÆ¶¯·½Ïò£º   -¡ú
-//		// ×ª¶¯³µÂÖ·½Ïò£º ¨J ¨I -
-//		//				  ¨I ¨J -
-//		//***Î»ÖÃ»·
-//		for (num = 0; num < 4; num++) // µç»ú1-4·Ö±ğ¼ÆËã
-//		{
-//			// ÊäÈë¾àÀë
-//			pid_pla[num].pid_get = motor_mm[num];
-//			
-//			// Êä³öÄ¿±êËÙ¶È
-//			pid_pla[num].pid_out = pid_calc(&pid_data_pla[num], pid_pla[num].pid_get, pid_pla[num].target);
-//			
-//			// ÊäÈëÄ¿±êËÙ¶È£¨Î»ÖÃ»·+ËÙ¶È»·£©
-//			pid_sch[num].target = pid_pla[num].pid_out;
-//		}
-//		
-//		//***ºÜĞ¡µÄ½Ç¶È»·  ±ÜÃâÅÜÆ«
-//		// ÊäÈë½Ç¶È(»ñÈ¡ÍÓÂİÒÇµÄÖµ),Êä³öĞ¡³µĞı×ªËÙ¶È
-//		pid_ang[0].pid_get = car_ang;
-//		pid_ang[0].pid_out = pid_calc(&pid_data_ang[0], pid_ang[0].pid_get, pid_ang[0].target);
-
-//		// ×ª¶¯³µÂÖ·½Ïò£º ¨J ¨K -
-//		//				  ¨I ¨L -
-//		pid_sch[0].target += pid_ang[0].pid_out;	 // ×óÇ°Çı¶¯
-//		pid_sch[1].target -= pid_ang[0].pid_out; // ÓÒÇ°
-//		pid_sch[2].target += pid_ang[0].pid_out;	 // ÓÒºó
-//		pid_sch[3].target -= pid_ang[0].pid_out; // ×óºó		
-//		
-//		//***Î»ÖÃ-ËÙ¶È»·
-//		for (num = 0; num < 4; num++) // µç»ú1-4·Ö±ğ¼ÆËã
-//		{
-//			// ÊäÈëµ±Ç°ËÙ¶È
-//			pid_sch[num].pid_get = motor_speed[num];
-//			// ¼ÆËãËÙ¶ÈµÄPID
-//			pid_sch[num].pid_out = pid_calc(&pid_data_sch[num], pid_sch[num].pid_get, pid_sch[num].target);
-//		}
-//		//Âí´ïÆô¶¯
-//		Motor_Set(pid_sch[0].pid_out,pid_sch[1].pid_out,pid_sch[2].pid_out,pid_sch[3].pid_out);
-//		
-//	}
-	
-	//²âÊÔ£¬·¢ËÍ¼à²âÊı¾İ
-//	printf("%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d\n",
-//	(int)motor_speed[0],(int)motor_speed[1],(int)motor_speed[2],(int)motor_speed[3],(int)(car_ang*10),
-//	(int)motor_mm[0],(int)motor_mm[1],(int)motor_mm[2],(int)motor_mm[3],Tar_x,Tar_y);
-	//(int)pid_spd[1].pid_out,(int)pid_spd[2].pid_out,(int)pid_spd[3].pid_out,(int)pid_spd[4].pid_out,Tar_x,Tar_y);
-	//printf("%d,%d,%d,%d,%d\n",(int)motor_mm[1],(int)motor_mm[2],(int)motor_mm[3],(int)motor_mm[4],(int)(car_ang*10));
-
+    pid->err = 0.0f;
+    pid->err_last = 0.0f;
+    pid->err_llast = 0.0f;
+    pid->err_sum = 0.0f;
+    pid->out = 0.0f;
+    pid->out_last = 0.0f;
 }
 
+/**
+ * @brief   å¢é‡å¼PIDè®¡ç®—å‡½æ•°ï¼ˆé»˜è®¤ä½¿ç”¨ï¼‰
+ * @param   pid        - PIDç»“æ„ä½“æŒ‡é’ˆ
+ * @param   measure    - å®é™…æµ‹é‡å€¼ï¼ˆåé¦ˆå€¼ï¼‰
+ * @param   target     - ç›®æ ‡å€¼ï¼ˆè®¾å®šå€¼ï¼‰
+ * @retval  float      - PIDè¾“å‡ºå€¼
+ * @note    æ­¤å‡½æ•°éœ€è¦å®šæ—¶è°ƒç”¨ï¼ˆä¾‹å¦‚æ¯éš”10msè°ƒç”¨ä¸€æ¬¡ï¼‰
+ *          é€‚åˆå•ç‰‡æœºï¼Œæ— ç§¯åˆ†é¥±å’Œé—®é¢˜
+ * @formula 
+ *          è¯¯å·® = ç›®æ ‡å€¼ - æµ‹é‡å€¼
+ *          å¢é‡ = Kp*(æœ¬æ¬¡è¯¯å·®-ä¸Šæ¬¡è¯¯å·®) + Ki*æœ¬æ¬¡è¯¯å·® + Kd*(æœ¬æ¬¡è¯¯å·®-2*ä¸Šæ¬¡è¯¯å·®+ä¸Šä¸Šæ¬¡è¯¯å·®)
+ */
+float PID_Calc(PID_t *pid, float measure, float target)
+{
+    float delta_out;
+    
+    pid->measure = measure;
+    pid->target = target;
+    
+    pid->err = pid->target - pid->measure;
+    
+    delta_out = pid->kp * (pid->err - pid->err_last)
+              + pid->ki * pid->err
+              + pid->kd * (pid->err - 2 * pid->err_last + pid->err_llast);
+    
+    pid->out_last += delta_out;
+    
+    if (pid->out_last > pid->out_max)
+        pid->out_last = pid->out_max;
+    else if (pid->out_last < pid->out_min)
+        pid->out_last = pid->out_min;
+    
+    pid->err_llast = pid->err_last;
+    pid->err_last = pid->err;
+    
+    pid->out = pid->out_last;
+    
+    return pid->out;
+}
 
+/**
+ * @brief   ä½ç½®å¼PIDè®¡ç®—å‡½æ•°
+ * @param   pid        - PIDç»“æ„ä½“æŒ‡é’ˆ
+ * @param   measure    - å®é™…æµ‹é‡å€¼ï¼ˆåé¦ˆå€¼ï¼‰
+ * @param   target     - ç›®æ ‡å€¼ï¼ˆè®¾å®šå€¼ï¼‰
+ * @retval  float      - PIDè¾“å‡ºå€¼
+ * @note    æ­¤å‡½æ•°éœ€è¦å®šæ—¶è°ƒç”¨ï¼ˆä¾‹å¦‚æ¯éš”10msè°ƒç”¨ä¸€æ¬¡ï¼‰
+ * @formula 
+ *          è¯¯å·® = ç›®æ ‡å€¼ - æµ‹é‡å€¼
+ *          Pé¡¹ = Kp * è¯¯å·®
+ *          Ié¡¹ = Ki * è¯¯å·®ç´¯è®¡
+ *          Dé¡¹ = Kd * (æœ¬æ¬¡è¯¯å·® - ä¸Šæ¬¡è¯¯å·®)
+ *          è¾“å‡º = Pé¡¹ + Ié¡¹ + Dé¡¹
+ */
+float PID_Position_Calc(PID_t *pid, float measure, float target)
+{
+    float p_out, i_out, d_out;
+    
+    pid->measure = measure;
+    pid->target = target;
+    
+    pid->err = pid->target - pid->measure;
+    pid->err_sum += pid->err;
+    
+    p_out = pid->kp * pid->err;
+    i_out = pid->ki * pid->err_sum;
+    d_out = pid->kd * (pid->err - pid->err_last);
+    
+    pid->out = p_out + i_out + d_out;
+    
+    if (pid->out > pid->out_max)
+        pid->out = pid->out_max;
+    else if (pid->out < pid->out_min)
+        pid->out = pid->out_min;
+    
+    pid->err_last = pid->err;
+    
+    return pid->out;
+}
